@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Summary Plugin — settings.yml additions
+# ─────────────────────────────────────────────────────────────────────────────
+# Merge this block into your existing settings.yml plugins: section.
+# The full plugin key is the Python class path: searx.plugins.ai_summary.SXNGPlugin
+# There is NO separate enabled_plugins list in modern SearXNG — active: true/false
+# controls whether the plugin runs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+plugins:
+
+  # ── keep your existing plugins exactly as they are ─────────────────────────
+  searx.plugins.calculator.SXNGPlugin:
+    active: true
+  searx.plugins.hash_plugin.SXNGPlugin:
+    active: true
+  searx.plugins.self_info.SXNGPlugin:
+    active: true
+  searx.plugins.unit_converter.SXNGPlugin:
+    active: true
+  searx.plugins.ahmia_filter.SXNGPlugin:
+    active: true
+  searx.plugins.hostnames.SXNGPlugin:
+    active: true
+  searx.plugins.time_zone.SXNGPlugin:
+    active: true
+  searx.plugins.tracker_url_remover.SXNGPlugin:
+    active: true
+  searx.plugins.oa_doi_rewrite.SXNGPlugin:
+    active: false
+  searx.plugins.tor_check.SXNGPlugin:
+    active: false
+  searx.plugins.infinite_scroll.SXNGPlugin:
+    active: false
+
+  # ── AI Summary ─────────────────────────────────────────────────────────────
+  searx.plugins.ai_summary.SXNGPlugin:
+    active: true
+
+    # Base URL of any OpenAI-compatible API.
+    # Leave the trailing slash off — the plugin appends /chat/completions.
+    #
+    # Examples:
+    #   Ollama (local):       http://localhost:11434/v1
+    #   LM Studio (local):    http://localhost:1234/v1
+    #   OpenAI:               https://api.openai.com/v1
+    #   Groq:                 https://api.groq.com/openai/v1
+    #   Together AI:          https://api.together.xyz/v1
+    #   LocalAI:              http://localhost:8080/v1
+    #   vLLM:                 http://localhost:8000/v1
+    base_url: "http://localhost:11434/v1"
+
+    # API key. For local providers (Ollama, LM Studio) any non-empty string works.
+    # For cloud providers use your real key: "sk-..."
+    api_key: "ollama"
+
+    # Model identifier — must be available on your endpoint.
+    # Examples: llama3, mistral, gpt-4o-mini, mixtral-8x7b-32768
+    model: "llama3"
+
+    # How many search results to include in the LLM prompt.
+    max_results: 5
+
+    # Maximum tokens the LLM may generate for the summary.
+    max_tokens: 300
+
+    # HTTP timeout in seconds. Increase for slow local hardware.
+    timeout: 20
+
+    # System prompt sent to the LLM before the search results.
+    system_prompt: >
+      You are a helpful assistant embedded in a search engine.
+      The user searched for a query and you are given the top search results.
+      Write a concise, factual summary (3-5 sentences) that directly answers
+      the query using the provided results.
+      Do NOT start with "Based on the results" or similar meta-phrases.
+      Do NOT include markdown formatting.
+      If the results are unrelated to the query, say you could not find a clear answer.

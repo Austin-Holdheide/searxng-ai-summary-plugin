@@ -1,0 +1,102 @@
+/*
+  ai_summary.less / ai_summary.css
+  ─────────────────────────────────
+  Place this file in:
+    searx/static/themes/simple/src/less/ai_summary.less
+  Then @import it from _base.less, OR just copy the compiled CSS block
+  into searx/static/themes/simple/css/searxng.min.css
+
+  If you prefer plain CSS, rename to ai_summary.css and link it from
+  your base template.
+*/
+
+/* ── Container ─────────────────────────────────────────────────────────────── */
+.ai-summary-box {
+  background: var(--color-answer-background, #e8f0fe);
+  border: 1px solid var(--color-answer-border, #aecbfa);
+  border-radius: 12px;
+  padding: 16px 20px 12px;
+  margin: 0 0 20px 0;
+  max-width: 800px;
+  font-family: inherit;
+}
+
+/* ── Header row ──────────────────────────────────────────────────────────── */
+.ai-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ai-summary-icon {
+  font-size: 1rem;
+  color: #4285f4;
+  line-height: 1;
+}
+
+.ai-summary-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1a73e8;
+  letter-spacing: 0.02em;
+}
+
+.ai-summary-model {
+  font-size: 0.75rem;
+  color: #888;
+  margin-left: auto;
+  font-style: italic;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+.ai-summary-content {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--color-text, #333);
+  white-space: pre-wrap;
+}
+
+/* ── Footer disclaimer ───────────────────────────────────────────────────── */
+.ai-summary-footer {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: #888;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding-top: 8px;
+}
+
+/* ── Dark theme overrides ────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  .ai-summary-box {
+    background: #1e2a3a;
+    border-color: #2d4a7a;
+  }
+
+  .ai-summary-label {
+    color: #7baff5;
+  }
+
+  .ai-summary-icon {
+    color: #7baff5;
+  }
+
+  .ai-summary-content {
+    color: #e0e0e0;
+  }
+}
+
+/* ── [data-theme="dark"] explicit class support ──────────────────────────── */
+[data-theme="dark"] .ai-summary-box {
+  background: #1e2a3a;
+  border-color: #2d4a7a;
+}
+
+[data-theme="dark"] .ai-summary-label,
+[data-theme="dark"] .ai-summary-icon {
+  color: #7baff5;
+}
+
+[data-theme="dark"] .ai-summary-content {
+  color: #e0e0e0;
+}

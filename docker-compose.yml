@@ -1,0 +1,11 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8080:8080" 
+    volumes:
+      - ./searxng:/etc/searxng                          # already there for settings.yml
+      # ── AI Summary plugin ──────────────────────────────────────────────────
+      - ./ai_summary.py:/usr/local/searxng/searx/plugins/ai_summary.py:ro
+      - ./ai_summary_box.html:/usr/local/searxng/searx/templates/simple/macros/ai_summary_box.html:ro
+      - ./ai_summary.css:/usr/local/searxng/searx/static/themes/simple/css/ai_summary.css:ro
