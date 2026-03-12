@@ -1,0 +1,2 @@
+# searxng-ai-summary-plugin
+ 
