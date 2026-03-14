@@ -5,11 +5,14 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Main config folder — settings.yml lives here
+      # Main config — settings.yml lives here
       - ./searxng:/etc/searxng
 
-      # AI Summary plugin files — mounted directly into the container
+      # AI Summary plugin
       - ./ai_summary.py:/usr/local/searxng/searx/plugins/ai_summary.py:ro
+
+      # AI Summary async JS — served as a static file
+      - ./ai_summary.js:/usr/local/searxng/searx/static/themes/simple/js/ai_summary.js:ro
 
     restart: unless-stopped
     cap_drop:
