@@ -12,10 +12,10 @@ SearXNG's plugin system works in three stages per search:
   3. post_search – runs after all results are collected (this is our hook)
 
 Our post_search() method:
-  a. Grabs the top N text results already collected by SearXNG
+  a. Grabs the top N results already collected by SearXNG
   b. Builds a prompt: query + result snippets
   c. POSTs to your OpenAI-compatible endpoint (/v1/chat/completions)
-  d. Returns an Answer() object → SearXNG renders it in the answer box
+  d. Returns an Answer() object — SearXNG renders it in the answer box
 
 CONFIGURATION (settings.yml)
 -----------------------------
@@ -67,11 +67,32 @@ def _setting(key: str, default=None):
     return get_setting(f"ai_summary.{key}", default)
 
 
+def _read(result, key: str) -> str:
+    """
+    Safely read a field from a result object.
+    SearXNG results are MainResult objects (attribute access),
+    but may also be plain dicts in some cases — handle both.
+    """
+    try:
+        # Try attribute access first (MainResult objects)
+        val = getattr(result, key, None)
+        if val is not None:
+            return str(val)
+        # Fall back to dict access
+        if hasattr(result, "get"):
+            val = result.get(key)
+            if val is not None:
+                return str(val)
+    except Exception:
+        pass
+    return ""
+
+
 class SXNGPlugin(Plugin):
     """AI summary box above search results via any OpenAI-compatible API."""
 
     id = "ai_summary"
-    keywords: list = []  # empty = run on every query (no trigger word needed)
+    keywords: list = []  # empty = run on every query
 
     def __init__(self, plg_cfg: "PluginCfg") -> None:
         # IMPORTANT: PluginCfg only accepts `active:`.
@@ -85,38 +106,29 @@ class SXNGPlugin(Plugin):
             preference_section="general",
         )
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _build_prompt(self, query: str, results: list) -> str:
         lines = [f'Search query: "{query}"\n\nTop results:\n']
         for i, r in enumerate(results, 1):
-            lines.append(
-                f"{i}. {r.get('title', '')} ({r.get('url', '')})\n"
-                f"   {r.get('content', '')}\n"
-            )
+            title   = _read(r, "title")
+            url     = _read(r, "url")
+            content = _read(r, "content")
+            lines.append(f"{i}. {title} ({url})\n   {content}\n")
         lines.append("\nWrite a concise summary answering the query.")
         return "\n".join(lines)
 
     def _call_llm(self, query: str, results: list) -> t.Optional[str]:
         base_url = _setting("base_url")
-        api_key  = _setting("api_key",  "no-key")
+        api_key  = _setting("api_key", "no-key")
         model    = _setting("model")
-        max_tokens = int(_setting("max_tokens", 300))
-        timeout    = float(_setting("timeout", 20))
+        max_tokens    = int(_setting("max_tokens", 300))
+        timeout       = float(_setting("timeout", 20))
         system_prompt = _setting("system_prompt") or _DEFAULT_PROMPT
 
-        # Validate required settings
         if not base_url:
-            logger.error(
-                "ai_summary: 'ai_summary.base_url' is missing from settings.yml"
-            )
+            logger.error("ai_summary: 'ai_summary.base_url' is missing from settings.yml")
             return None
         if not model:
-            logger.error(
-                "ai_summary: 'ai_summary.model' is missing from settings.yml"
-            )
+            logger.error("ai_summary: 'ai_summary.model' is missing from settings.yml")
             return None
 
         endpoint = base_url.rstrip("/") + "/chat/completions"
@@ -156,23 +168,20 @@ class SXNGPlugin(Plugin):
 
         return None
 
-    # ------------------------------------------------------------------
-    # SearXNG hook
-    # ------------------------------------------------------------------
-
     def post_search(
         self,
         request: "SXNG_Request",
         search:  "SearchWithPlugins",
     ) -> list:
-        # Skip page 2 and beyond — summary only makes sense on page 1
+        # Skip page 2+ — summary only on page 1
         if search.search_query.pageno > 1:
             return []
 
-        # Only use results that have a text snippet
+        # Collect results that have a content snippet
+        # Use _read() because results are MainResult objects, not dicts
         text_results = [
             r for r in search.result_container.get_ordered_results()
-            if r.get("content")
+            if _read(r, "content")
         ]
         if not text_results:
             return []
@@ -182,8 +191,8 @@ class SXNGPlugin(Plugin):
 
         summary = self._call_llm(query, text_results[:max_results])
         if summary:
-            # Answer() is displayed in the highlighted answer box above results.
-            # This is the same area used by the Calculator and Self-Info plugins.
+            # Answer() renders in the highlighted box above search results —
+            # same area used by the Calculator and Self-Info built-in plugins.
             return [Answer(answer=summary)]
 
         return []
