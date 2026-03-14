@@ -143,6 +143,15 @@
     return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
+  function linkify(text) {
+    // Escape HTML first, then convert URLs to clickable links
+    const escaped = escapeHtml(text);
+    return escaped.replace(
+      /(https?:\/\/[^\s<>"]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;text-underline-offset:2px;opacity:0.85;">$1</a>'
+    );
+  }
+
   function placeholder() {
     const box = document.createElement("div");
     box.id = "ai-summary-box";
@@ -164,7 +173,7 @@
         <span class="ai-icon">✦</span>
         <span class="ai-label">AI Summary</span>
       </div>
-      <p class="ai-content">${escapeHtml(text)}</p>
+      <p class="ai-content">${linkify(text)}</p>
       <div class="ai-footer">AI-generated · May contain inaccuracies · Verify important information</div>`;
   }
 
