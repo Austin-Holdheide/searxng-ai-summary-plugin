@@ -1,25 +1,12 @@
 # SearXNG AI Summary Plugin
 
+
+
 Adds an AI-generated summary box above search results using any OpenAI-compatible
 endpoint (LM Studio, Ollama, OpenAI, Groq, etc.) — just like Google's AI Overview
 and DuckDuckGo's Search Assist.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  ✦  AI Summary                                                  │
-│                                                                 │
-│  Minecraft house tutorials are available across multiple        │
-│  platforms. Rock Paper Shotgun offers 50 house designs using    │
-│  white wool, wood, and stone bricks. Build It provides          │
-│  step-by-step guides for survival houses and redstone farms.    │
-│                                                                 │
-│  AI-generated · May contain inaccuracies · Verify important...  │
-└─────────────────────────────────────────────────────────────────┘
-
-  1. rockpapershotgun.com › Minecraft house ideas: 50 best...
-  2. builditapp.com › Build It – Minecraft Building Made Simple
-  3. ...
-```
+![SearXNG AI Summary Plugin](images/Ai%20Summary.png)
 
 ---
 
@@ -116,7 +103,7 @@ searxng-ai-summary/
 
 ### Prerequisites
 
-- Docker installed and running
+- Docker Desktop installed and running
 - LM Studio (or any OpenAI-compatible API) running and accessible
 - A model loaded in LM Studio
 
@@ -129,8 +116,6 @@ your-folder/
 ├── docker-compose.yml
 ├── ai_summary.py
 ├── ai_summary.js
-├── ai_summary.css
-├── ai_summary_box.html
 └── searxng/
     └── settings.yml
 ```
