@@ -1,11 +1,26 @@
 services:
   searxng:
     image: searxng/searxng:latest
+    container_name: searxng
     ports:
-      - "8080:8080" 
+      - "8080:8080"
     volumes:
-      - ./searxng:/etc/searxng                          # already there for settings.yml
-      # ── AI Summary plugin ──────────────────────────────────────────────────
+      # Main config folder — settings.yml lives here
+      - ./searxng:/etc/searxng
+
+      # AI Summary plugin files — mounted directly into the container
       - ./ai_summary.py:/usr/local/searxng/searx/plugins/ai_summary.py:ro
-      - ./ai_summary_box.html:/usr/local/searxng/searx/templates/simple/macros/ai_summary_box.html:ro
-      - ./ai_summary.css:/usr/local/searxng/searx/static/themes/simple/css/ai_summary.css:ro
+
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
