@@ -116,7 +116,7 @@ searxng-ai-summary/
 
 ### Prerequisites
 
-- Docker Desktop installed and running
+- Docker installed and running
 - LM Studio (or any OpenAI-compatible API) running and accessible
 - A model loaded in LM Studio
 
@@ -129,6 +129,8 @@ your-folder/
 ├── docker-compose.yml
 ├── ai_summary.py
 ├── ai_summary.js
+├── ai_summary.css
+├── ai_summary_box.html
 └── searxng/
     └── settings.yml
 ```
