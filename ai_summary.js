@@ -264,6 +264,25 @@
     return first ? first.parentElement : null;
   }
 
+  // Watch for our box being removed from the DOM by SearXNG's own JS
+  // (SearXNG re-renders the results area after all engines respond,
+  //  which can destroy elements we inserted)
+  function watchBox(box, target) {
+    const observer = new MutationObserver(() => {
+      if (!document.body.contains(box)) {
+        // Box was removed — re-insert it
+        const newTarget = findInsertTarget();
+        if (newTarget) {
+          newTarget.insertAdjacentElement("beforebegin", box);
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Stop watching after 30s (SearXNG should be stable by then)
+    setTimeout(() => observer.disconnect(), 30000);
+    return observer;
+  }
+
   function esc(s) {
     return String(s || "")
       .replace(/&/g,"&amp;").replace(/</g,"&lt;")
@@ -521,9 +540,20 @@
     function tick() {
       if (queue.length === 0) {
         if (streamDone) {
+          // Safety check: if the box was removed from DOM by SearXNG's JS,
+          // re-insert the wrapper before finalising
+          const wrapper = document.getElementById("ai-summary-wrapper");
+          if (wrapper && !document.body.contains(wrapper)) {
+            const t = findInsertTarget();
+            if (t) t.insertAdjacentElement("beforebegin", wrapper);
+          }
+
           contentEl.innerHTML = linkify(displayed);
           if (displayed.trim()) addMoreButton(box, results);
-          else box.remove();
+          else {
+            // Don't remove if box has content mid-stream (race condition guard)
+            if (!displayed) box.closest("#ai-summary-wrapper")?.remove();
+          }
           return;
         }
         // Queue empty but stream still going — wait briefly
@@ -635,8 +665,18 @@
     if (!results.length) return;
 
     injectStyles();
+
+    // Wrap box in a stable container div so SearXNG re-renders
+    // don't directly affect it
+    const wrapper = document.createElement("div");
+    wrapper.id = "ai-summary-wrapper";
     const box = createBox();
-    target.insertAdjacentElement("beforebegin", box);
+    wrapper.appendChild(box);
+    target.insertAdjacentElement("beforebegin", wrapper);
+
+    // Watch for wrapper being removed and re-insert if needed
+    watchBox(wrapper, target);
+
     streamCompact(box, query, results);
   }
 
