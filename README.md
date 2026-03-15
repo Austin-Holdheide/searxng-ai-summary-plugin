@@ -1,88 +1,150 @@
 # SearXNG AI Summary Plugin
 
-
-
-Adds an AI-generated summary box above search results using any OpenAI-compatible
-endpoint (LM Studio, Ollama, OpenAI, Groq, etc.) — just like Google's AI Overview
-and DuckDuckGo's Search Assist.
-
 ![SearXNG AI Summary Plugin](images/Ai%20Summary.png)
+
+Adds a streaming AI summary above search results using any OpenAI-compatible endpoint — just like Google's AI Overview and DuckDuckGo's Search Assist. Built for self-hosted SearXNG with Docker.
+
+---
+
+## Features
+
+- **Instant results** — search results load at full speed, summary streams in after
+- **Typewriter effect** — text appears character by character as the LLM generates it
+- **"More" button** — expands into a structured deep-dive powered by a smarter model
+- **Progressive rendering** — sections appear as they complete, not all at once
+- **Code blocks** — commands render with syntax highlighting and a Copy button
+- **Generating indicator** — spinning loader shows while the More panel is still generating
+- **Auto-injected** — no template files need editing, ever
+- **Dark/light theme** — follows SearXNG's theme automatically
+- **Any OpenAI-compatible backend** — LM Studio, Ollama, OpenAI, Groq, and more
+
+---
+
+## What It Looks Like
+
+**Compact summary** (fast model, streams in immediately):
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ✦  AI Summary                                               │
+│                                                              │
+│  Apache is a web server used to serve websites. Install it   │
+│  with apt, then start the service with systemctl...▌         │
+│                                                              │
+│  ( More ▾ )                                                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**More panel** (smart model, renders progressively):
+```
+┌──────────────────────────────────────────────────────────────┐
+│  To run Apache you need to install, start, and configure...  │
+│                                                              │
+│  ○ ubuntu.com  ○ digitalocean.com  ○ apache.org              │
+│                                                              │
+│  Installing Apache                                           │
+│  • Update your package list first                            │
+│  ② ┌─────────────────────────────────────────┐              │
+│     │ </> bash               📋 Copy Code     │              │
+│     │ sudo apt update && sudo apt install     │              │
+│     │ apache2                                 │              │
+│     └─────────────────────────────────────────┘              │
+│                                                              │
+│  ○ spinning  Generating...                                   │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## How It Works
 
-The plugin uses a fully **async architecture** — search results appear immediately
-with zero delay, and the AI summary loads after in the background.
+### The Async Flow
 
 ```
 User types query
-       │
-       ▼
-SearXNG queries search engines ──────────────── results appear instantly
-       │
-       │  (meanwhile, in the background...)
-       │
-       ▼
-Browser loads ai_summary.js  (injected automatically by the plugin)
-       │
-       ▼
-JS creates "Generating summary…" spinner above results
-       │
-       ▼
-JS reads result snippets already rendered on the page
-       │
-       ▼
-JS POSTs to /ai_summary  (a Flask endpoint registered by the plugin)
-       │
-       ▼
-Flask calls your LLM at base_url/chat/completions
-       │
-       ▼
-LLM returns summary  (5–20 seconds depending on model/hardware)
-       │
-       ▼
-Spinner replaced with styled summary box  ✦ smooth fade-in
+      │
+      ▼
+SearXNG queries engines ───────────────── Results appear instantly (no wait)
+      │
+      ▼
+Browser loads ai_summary.js             (auto-injected by the plugin)
+      │
+      ▼
+JS creates summary box with blinking cursor above results
+      │
+      ▼
+JS reads result snippets from the page DOM
+      │
+      ▼
+JS opens SSE stream → POST /ai_summary
+      │
+      ▼
+Flask streams tokens from fast model ──── Characters appear one by one
+      │
+      ▼
+Stream ends → "More ▾" button appears
+      │
+      ▼ (user clicks More)
+JS opens SSE stream → POST /ai_summary_more
+      │
+      ├── overview arrives   → renders paragraph
+      ├── section 1 closes   → renders heading + bullets/code blocks
+      ├── section 2 closes   → renders heading + bullets/code blocks
+      ├── follow_up closes   → renders "Explore More" questions
+      └── stream ends        → generating indicator disappears
 ```
 
-### Why It's Split Into Two Settings Blocks
+### Why Two Settings Blocks
 
-SearXNG's plugin configuration system uses a dataclass called `PluginCfg` that
-**only accepts `active: true/false`**. If you put any other key (like `base_url`
-or `model`) under a plugin entry, SearXNG crashes on startup with:
+SearXNG's `PluginCfg` dataclass only accepts `active: true/false`. Putting any
+other key under a plugin entry crashes SearXNG on startup:
 
 ```
 TypeError: PluginCfg.__init__() got an unexpected keyword argument 'base_url'
 ```
 
-The solution is two separate blocks in `settings.yml`:
+The fix is two separate blocks in `settings.yml`:
 
 ```yaml
-# Block 1 — under plugins: (ONLY active: allowed here)
+# Block 1 — inside plugins: (ONLY active: allowed here)
 plugins:
   searx.plugins.ai_summary.SXNGPlugin:
     active: true
 
-# Block 2 — top-level key (all LLM config goes here)
+# Block 2 — new top-level key (all LLM config goes here)
 ai_summary:
-  base_url: "http://192.168.1.238:1234/v1"
-  model: "google/gemma-3-4b-it"
+  base_url: "http://127.0.0.1:1234/v1"
+  model: "google/gemma-3-1b"
+  model_more: "openai/gpt-oss-20b"
   ...
 ```
 
-The plugin reads Block 2 via `get_setting("ai_summary.base_url")` — a SearXNG
-built-in that walks the settings dict by dot-separated path.
+The plugin reads Block 2 via `get_setting("ai_summary.base_url")`.
 
-### How the Script Injection Works
+### How the Script Is Injected
 
-The plugin's `init(app)` method is called once at Flask startup and registers:
+The plugin's `init(app)` method runs once at Flask startup and registers:
 
-1. **`POST /ai_summary`** — a new Flask route that receives the query + result
-   snippets from the browser, calls your LLM, and returns the summary as JSON.
+1. **`POST /ai_summary`** — streaming SSE endpoint for the compact summary
+2. **`POST /ai_summary_more`** — streaming SSE endpoint for the More panel
+3. **`after_request` hook** — appends `<script src="ai_summary.js">` to every
+   HTML page that contains `id="results"`. No template editing ever needed.
 
-2. **`after_request` hook** — intercepts every HTML response. If the page
-   contains `id="results"`, it appends a `<script>` tag before `</body>`. This
-   means **no template files need to be edited** — ever.
+### How Streaming Works
+
+Both endpoints use `stream: true` in the LLM request and return
+`text/event-stream` (SSE). The browser reads each chunk using the Fetch
+`ReadableStream` API.
+
+**Compact summary** — characters are pushed into a queue and drained at a
+speed that matches the LLM: fast when tokens arrive in bursts, slow when
+the model pauses. The blinking cursor shows while generation is ongoing.
+
+**More panel** — raw JSON streams in. A progressive parser scans the
+incomplete buffer on every chunk using balanced-brace counting and regex
+matching to extract completed pieces and render them immediately:
+- `"overview": "..."` → paragraph rendered
+- Each completed `{...}` in `sections` → section rendered with code blocks
+- `"follow_up": [...]` → questions rendered
 
 ---
 
@@ -90,11 +152,11 @@ The plugin's `init(app)` method is called once at Flask startup and registers:
 
 ```
 searxng-ai-summary/
-├── docker-compose.yml        ← orchestrates the container
-├── ai_summary.py             ← the plugin (Flask routes + post_search hook)
-├── ai_summary.js             ← async frontend loader (injected automatically)
+├── docker-compose.yml     ← start here
+├── ai_summary.py          ← plugin: Flask routes + script injection
+├── ai_summary.js          ← frontend: streaming loader + progressive renderer
 └── searxng/
-    └── settings.yml          ← all configuration lives here
+    └── settings.yml       ← all configuration lives here
 ```
 
 ---
@@ -104,12 +166,12 @@ searxng-ai-summary/
 ### Prerequisites
 
 - Docker Desktop installed and running
-- LM Studio (or any OpenAI-compatible API) running and accessible
-- A model loaded in LM Studio
+- LM Studio (or any OpenAI-compatible API) running on your network
+- At least one model loaded and ready
 
-### Step 1 — Clone or download the files
+### Step 1 — Get the files
 
-Make sure your folder looks exactly like this:
+Your folder must look exactly like this:
 
 ```
 your-folder/
@@ -122,34 +184,46 @@ your-folder/
 
 ### Step 2 — Edit `searxng/settings.yml`
 
-Find the `ai_summary:` block near the bottom and change these three values:
+**Enable the plugin** — add this inside the `plugins:` section:
+
+```yaml
+  searx.plugins.ai_summary.SXNGPlugin:
+    active: true
+```
+
+**Configure the LLM** — add this as a new top-level key (not inside `plugins:`):
 
 ```yaml
 ai_summary:
-  base_url: "http://192.168.1.238:1234/v1"   # ← your LM Studio IP and port
-  api_key:  "lm-studio"                       # ← any string for local providers
-  model:    "google/gemma-3-4b-it"            # ← exact model name from LM Studio
+  base_url: "http://127.0.0.1:1234/v1"   # your LM Studio IP:port
+  api_key:  "lm-studio"                       # any string for local providers
+  model:       "google/gemma-3-1b"            # fast model — compact summary
+  model_more:  "openai/gpt-oss-20b"           # smart model — More panel
+  max_results: 5
+  max_tokens:  300
+  max_tokens_more: 800
+  timeout: 60
 ```
 
-To find your IP address on Windows:
+**Find your IP address** (Windows):
 ```powershell
 ipconfig
-# Look for "IPv4 Address" under your network adapter
+# Look for IPv4 Address under your active network adapter
 ```
 
-To find the exact model name: open LM Studio → Developer tab → copy the model
-identifier shown at the top.
+**Find your model name** — open LM Studio → Developer tab → copy the
+model identifier shown under "API Model Identifier".
 
-Also change the secret key to something random:
+**Set a secret key**:
 ```yaml
 server:
-  secret_key: "replace-this-with-something-random-and-long"
+  secret_key: "replace-this-with-something-long-and-random"
 ```
 
 ### Step 3 — Start
 
 ```powershell
-cd path\to\your-folder
+cd C:\path\to\your-folder
 docker compose up -d
 ```
 
@@ -159,8 +233,8 @@ docker compose up -d
 http://localhost:8080
 ```
 
-Search for anything. The results appear immediately. After a few seconds the
-AI summary box fades in above the results.
+Search for anything. Results load immediately. The AI summary types itself
+in above the results. Click **More** for the structured deep-dive.
 
 ---
 
@@ -168,50 +242,54 @@ AI summary box fades in above the results.
 
 All settings live in `searxng/settings.yml` under the `ai_summary:` key.
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `base_url` | — | OpenAI-compatible API URL (no trailing slash) |
-| `api_key` | `"lm-studio"` | API key — any string for local providers |
-| `model` | — | Exact model identifier |
-| `max_results` | `5` | How many result snippets to send to the LLM |
-| `max_tokens` | `300` | Max length of the generated summary |
-| `timeout` | `30` | Seconds before the LLM request gives up |
-| `system_prompt` | (built-in) | Instructions sent to the LLM |
+| Key | Description |
+|-----|-------------|
+| `base_url` | OpenAI-compatible API root URL (no trailing slash) |
+| `api_key` | API key — any non-empty string for local providers |
+| `model` | Fast model used for the compact summary |
+| `model_more` | Smart model used for the More panel |
+| `max_results` | Result snippets sent to the LLM (default: 5) |
+| `max_tokens` | Max tokens for compact summary (default: 300) |
+| `max_tokens_more` | Max tokens for More panel (default: 800) |
+| `timeout` | Request timeout in seconds (default: 60) |
+| `system_prompt` | System prompt for compact summary |
+| `system_prompt_more` | System prompt for More panel — must instruct the model to return JSON |
 
 ### Supported Backends
 
 | Provider | `base_url` | `api_key` |
 |----------|-----------|-----------|
-| LM Studio (local) | `http://YOUR_IP:1234/v1` | `lm-studio` |
-| Ollama (local) | `http://YOUR_IP:11434/v1` | `ollama` |
+| LM Studio | `http://YOUR_IP:1234/v1` | `lm-studio` |
+| Ollama | `http://YOUR_IP:11434/v1` | `ollama` |
 | OpenAI | `https://api.openai.com/v1` | `sk-...` |
 | Groq | `https://api.groq.com/openai/v1` | `gsk_...` |
 | Together AI | `https://api.together.xyz/v1` | your key |
+| vLLM | `http://YOUR_IP:8000/v1` | any string |
 
 ### Recommended Models
 
-| Model | Speed | Quality | Notes |
-|-------|-------|---------|-------|
-| `google/gemma-3-4b-it` | ⚡⚡⚡ | ★★★★ | Best all-rounder for summaries |
-| `microsoft/phi-4-mini-instruct` | ⚡⚡⚡ | ★★★★ | Very fast, great instruction following |
-| `qwen/qwen2.5-7b-instruct` | ⚡⚡ | ★★★★★ | Best quality at medium speed |
-| `mistralai/mistral-7b-instruct` | ⚡⚡ | ★★★★ | Reliable, follows prompts well |
-| `google/gemma-3-1b-it` | ⚡⚡⚡⚡ | ★★★ | Fastest option, decent quality |
+| Model | Speed | Quality | Best for |
+|-------|-------|---------|----------|
+| `google/gemma-3-1b-it` | ⚡⚡⚡⚡ | ★★★ | `model` — fastest compact summary |
+| `google/gemma-3-4b-it` | ⚡⚡⚡ | ★★★★ | `model` — best speed/quality balance |
+| `microsoft/phi-4-mini-instruct` | ⚡⚡⚡ | ★★★★ | `model` — great instruction following |
+| `qwen/qwen2.5-7b-instruct` | ⚡⚡ | ★★★★★ | `model_more` — best structured output |
+| `mistralai/mistral-7b-instruct` | ⚡⚡ | ★★★★ | `model_more` — reliable JSON output |
+| `openai/gpt-oss-20b` | ⚡ | ★★★★★ | `model_more` — highest quality |
 
-Always use `-it` or `-instruct` variants — they follow the system prompt reliably.
+Always use `-it` or `-instruct` variants. The More panel requires a model
+that reliably returns valid JSON — larger models do this better.
 
 ---
 
-## After Changing Settings
-
-Any change to `settings.yml` requires a restart:
+## After Any Change
 
 ```powershell
 docker compose restart searxng
 ```
 
-Any change to `ai_summary.py` or `ai_summary.js` also requires a restart
-(the files are volume-mounted so no rebuild needed).
+Changes to `settings.yml`, `ai_summary.py`, or `ai_summary.js` all take
+effect after a restart. No rebuild needed — all files are volume-mounted.
 
 ---
 
@@ -221,42 +299,45 @@ Any change to `ai_summary.py` or `ai_summary.js` also requires a restart
 # Watch live logs
 docker compose logs -f searxng
 
-# Check for plugin-specific errors
+# Filter for plugin messages only
 docker compose logs searxng | findstr ai_summary
 ```
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `PluginCfg unexpected keyword` | LLM settings under `plugins:` | Move them to `ai_summary:` top-level block |
-| `Connection refused` | Wrong IP/port or LM Studio not running | Check `base_url` and that LM Studio is on |
-| No summary, no error | Plugin not active | Confirm `active: true` and `ai_summary.py` is mounted |
-| Spinner never goes away | LLM timeout | Increase `timeout`, try a smaller/faster model |
-| HTTP 401/403 | Wrong API key | Fix `api_key` |
-| HTTP 404 | Wrong URL or model name | Fix `base_url` or `model` |
-| Summary has markdown | Model ignoring system prompt | Use an `-instruct` model variant |
+| `PluginCfg unexpected keyword` | LLM settings inside `plugins:` block | Move them to the separate `ai_summary:` top-level block |
+| SearXNG won't start | YAML indentation error | Check that all plugin keys have exactly 2 spaces indent |
+| `Connection refused` | LM Studio server not started | Open LM Studio → Developer → flip Status toggle to ON |
+| No summary, no error | Plugin not loaded | Check `active: true` is set and `ai_summary.py` is volume-mounted |
+| Summary never appears | LLM timeout | Increase `timeout` or use a smaller model |
+| More panel shows raw JSON | Old JS file cached | Hard refresh (`Ctrl+Shift+R`) or restart container |
+| More panel errors | Smart model too slow | Increase `timeout`, reduce `max_tokens_more`, or use a faster model |
+| HTTP 401/403 | Wrong API key | Fix `api_key` in settings.yml |
+| HTTP 404 | Wrong URL or model name | Fix `base_url` or `model` / `model_more` |
+| Summary has markdown | Model ignoring system prompt | Switch to an `-instruct` or `-it` model variant |
 
-### Test your LLM connection directly
+### Test your LLM directly
 
 ```powershell
-# Save test payload
 @'
 {
   "model": "YOUR_MODEL_NAME",
-  "max_tokens": 100,
+  "max_tokens": 150,
+  "stream": false,
   "messages": [
     {"role": "system", "content": "Summarize in 2 sentences. No markdown."},
-    {"role": "user", "content": "What is Python?"}
+    {"role": "user",   "content": "What is Apache web server?"}
   ]
 }
 '@ | Out-File -FilePath test.json -Encoding utf8
 
-# Send it
 curl.exe -X POST http://YOUR_IP:1234/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d "@test.json"
 ```
 
-A working response contains `choices[0].message.content` with a plain text summary.
+A working response has `choices[0].message.content` with plain text. If this
+works but the plugin doesn't, check the Docker logs for the exact error.
 
 ---
 
