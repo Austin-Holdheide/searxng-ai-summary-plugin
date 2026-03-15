@@ -256,10 +256,19 @@ plugins:
 ai_summary:
   base_url: "http://127.0.0.1:1234/v1"
   api_key: "lm-studio"
+
+  # Fast/small model — used for the compact summary that appears first
   model: "google/gemma-3-1b"
+
+  # Smart/large model — used when the user clicks "More"
+  model_more: "qwen/qwen3-vl-8b"
+
   max_results: 5
   max_tokens: 300
-  timeout: 30
+  max_tokens_more: 600
+  timeout: 60
+
+  # Compact summary prompt — keep it short, plain text only
   system_prompt: >
     You are a helpful assistant embedded in a search engine.
     The user searched for a query and you are given the top search results.
@@ -268,6 +277,27 @@ ai_summary:
     Do NOT start with "Based on the results" or similar meta-phrases.
     Do NOT use markdown formatting.
     If the results are unrelated to the query, say you could not find a clear answer.
+
+  # More panel prompt — MUST return valid JSON, no markdown, no code fences
+  system_prompt_more: >
+    You are a helpful assistant in a search engine.
+    Return ONLY valid JSON — no markdown fences, no explanation, just raw JSON.
+    Use exactly this shape:
+    {"overview": "2-3 sentence intro paragraph",
+     "sections": [
+       {"title": "Section Title",
+        "items": [
+          {"type": "text", "value": "A plain bullet point"},
+          {"type": "code", "lang": "bash", "value": "the command or code here"}
+        ]}
+     ],
+     "follow_up": ["Follow-up question 1?", "Follow-up question 2?", "Follow-up question 3?"]}
+    Rules:
+    - Use 2-4 sections with 2-5 items each.
+    - Use type "code" for any command, code snippet, or technical string. Set lang to bash, python, js, etc.
+    - Use type "text" for plain explanations and bullet points.
+    - Keep follow_up to exactly 3 questions.
+    - Return ONLY the JSON object. Nothing else.
 # Configuration of the "Hostnames plugin":
 #
 # hostnames:
