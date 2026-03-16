@@ -266,7 +266,7 @@ ai_summary:
 
   max_results: 5
   max_tokens: 300
-  max_tokens_more: 600
+  max_tokens_more: 800
   timeout: 60
 
   # Compact summary prompt — keep it short, plain text only
