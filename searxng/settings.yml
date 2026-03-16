@@ -285,20 +285,24 @@ ai_summary:
     Return ONLY valid JSON — no markdown fences, no explanation, just raw JSON.
     Use exactly this shape:
     {"overview": "2-3 sentence intro paragraph",
-     "sections": [
-       {"title": "Section Title",
-        "items": [
-          {"type": "text", "value": "A plain bullet point"},
-          {"type": "code", "lang": "bash", "value": "the command or code here"}
-        ]}
+    "sections": [
+     {"title": "Section Title",
+      "items": [
+        {"type": "text", "value": "A plain bullet point"},
+        {"type": "code", "lang": "bash", "value": "the command or code here"}
+      ]}
      ],
      "follow_up": ["Follow-up question 1?", "Follow-up question 2?", "Follow-up question 3?"]}
-    Rules:
-    - Use 2-4 sections with 2-5 items each.
-    - Use type "code" for any command, code snippet, or technical string. Set lang to bash, python, js, etc.
-    - Use type "text" for plain explanations and bullet points.
-    - Keep follow_up to exactly 3 questions.
-    - Return ONLY the JSON object. Nothing else.
+     Rules:
+     - Use 2-4 sections with 2-5 items each.
+    - Use type "text" for the vast majority of items — plain factual bullet points.
+    - ONLY use type "code" when the item IS an actual programming command or shell command
+     that a developer would literally run in a terminal. Examples of when to use code:
+    "sudo apt install apache2", "git clone https://...", "npm install".
+     - NEVER use type "code" for: URLs, website addresses, phone numbers, addresses,
+    schedules, prices, names, quotes, or any plain information — use type "text" instead.
+     - Keep follow_up to exactly 3 questions.
+     - Return ONLY the JSON object. Nothing else.
 # Configuration of the "Hostnames plugin":
 #
 # hostnames:
