@@ -241,24 +241,23 @@
     const existing = document.getElementById("ai-summary-wrapper");
     if (existing && existing !== wrapper) existing.remove();
 
-    const main = document.getElementById("main_results");
-    if (!main) return false;
-
-    // Insert directly before #main_results in body
-    main.parentNode.insertBefore(wrapper, main);
-
-    // Copy #main_results layout so our box appears in the same column
-    // Use padding-left to match the results column position
-    const urlsEl = document.getElementById("urls");
-    if (urlsEl) {
-      const rect = urlsEl.getBoundingClientRect();
-      const mainRect = main.getBoundingClientRect();
-      wrapper.style.paddingLeft  = (rect.left - mainRect.left) + "px";
-      wrapper.style.paddingRight = (mainRect.right - rect.right) + "px";
-      wrapper.style.marginBottom = "-16px"; // remove gap between wrapper and main_results
+    // Insert as the first child of #results — this is BELOW the search bar
+    // but above the actual result list. SearXNG never replaces #results itself,
+    // only its children (#answers, #urls etc), so our wrapper survives.
+    const resultsEl = document.getElementById("results");
+    if (resultsEl) {
+      resultsEl.insertBefore(wrapper, resultsEl.firstChild);
+      return true;
     }
 
-    return true;
+    // Fallback: before #urls inside whatever parent it lives in
+    const urls = document.getElementById("urls");
+    if (urls && urls.parentNode) {
+      urls.parentNode.insertBefore(wrapper, urls);
+      return true;
+    }
+
+    return false;
   }
 
   // ── SSE stream reader ─────────────────────────────────────────────────────
@@ -267,10 +266,13 @@
 
   async function readStream(url, body, onChunk, onDone, onError) {
     try {
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      // GET request — only the query string is sent to the server.
+      // The server fetches its own results internally so the client
+      // cannot inject crafted results into the LLM prompt.
+      const params = new URLSearchParams({ q: body.query || "" });
+      const resp = await fetch(url + "?" + params.toString(), {
+        method: "GET",
+        headers: { "Accept": "text/event-stream" },
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
 
