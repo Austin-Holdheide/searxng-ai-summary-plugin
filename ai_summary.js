@@ -1,15 +1,16 @@
 /**
  * SearXNG AI Summary — Streaming + Progressive JSON Rendering
- * =============================================================
- * Compact summary: types text token by token with blinking cursor.
- * More panel: renders each section AS it completes while streaming —
- *   overview appears first, then sections one by one, then follow-ups.
+ * Body-level insertion to survive SearXNG's DOM re-renders through proxies.
  */
-
 (function () {
   "use strict";
 
   const CSS = `
+    #ai-summary-wrapper {
+      /* Positioned directly in body, before #main_results.
+         We copy #main_results layout in JS so it lines up perfectly. */
+      box-sizing: border-box;
+    }
     #ai-summary-box {
       background: var(--color-base-background, #1a1a1a);
       border: 1px solid rgba(255,255,255,0.1);
@@ -66,22 +67,15 @@
       margin-top:12px; padding-top:14px; display:none;
     }
     #ai-summary-box .ai-expanded.visible { display:block; }
-
-    /* Progressive render: each block slides in */
-    #ai-summary-box .ai-block {
-      animation: ai-block-in 0.2s ease;
-    }
+    #ai-summary-box .ai-block { animation:ai-block-in 0.2s ease; }
     @keyframes ai-block-in {
       from { opacity:0; transform:translateY(6px); }
       to   { opacity:1; transform:translateY(0); }
     }
-
     #ai-summary-box .ai-overview {
       color:var(--color-text,#e0e0e0);
       font-size:0.88rem; line-height:1.65; margin:0 0 14px 0;
     }
-    #ai-summary-box .ai-overview .ai-cursor { display:inline-block; }
-
     #ai-summary-box code {
       background:rgba(255,255,255,0.1); border-radius:4px; padding:1px 5px;
       font-family:'Consolas','Monaco','Courier New',monospace;
@@ -89,8 +83,7 @@
     }
     #ai-summary-box .ai-section { margin-bottom:18px; }
     #ai-summary-box .ai-section-title {
-      font-weight:700; font-size:0.9rem;
-      color:var(--color-text,#fff); margin:0 0 10px 0;
+      font-weight:700; font-size:0.9rem; color:var(--color-text,#fff); margin:0 0 10px 0;
     }
     #ai-summary-box .ai-item-text {
       display:flex; align-items:flex-start; gap:8px;
@@ -169,38 +162,20 @@
       border-radius:50%; animation:ai-spin 0.7s linear infinite; flex-shrink:0;
     }
     @keyframes ai-spin { to { transform:rotate(360deg); } }
-
-    /* Sticky "generating" bar shown at bottom of More panel while streaming */
     #ai-summary-box .ai-generating {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 0 2px 0;
-      font-size: 0.75rem;
-      color: #666;
-      border-top: 1px solid rgba(255,255,255,0.06);
-      margin-top: 10px;
+      display:flex; align-items:center; gap:8px;
+      padding:8px 0 2px 0; font-size:0.75rem; color:#666;
+      border-top:1px solid rgba(255,255,255,0.06); margin-top:10px;
     }
     #ai-summary-box .ai-generating .ai-gen-spinner {
-      width: 12px; height: 12px;
-      border: 2px solid rgba(66,133,244,0.2);
-      border-top-color: #4285f4;
-      border-radius: 50%;
-      animation: ai-spin 0.7s linear infinite;
-      flex-shrink: 0;
+      width:12px; height:12px;
+      border:2px solid rgba(66,133,244,0.2); border-top-color:#4285f4;
+      border-radius:50%; animation:ai-spin 0.7s linear infinite; flex-shrink:0;
     }
     #ai-summary-box .ai-generating .ai-gen-dots::after {
-      content: '';
-      animation: ai-dots 1.2s steps(4,end) infinite;
+      content:''; animation:ai-dots 1.2s steps(4,end) infinite;
     }
-    @keyframes ai-dots {
-      0%  { content: '';    }
-      25% { content: '.';   }
-      50% { content: '..';  }
-      75% { content: '...'; }
-    }
-
-    /* Light theme */
+    @keyframes ai-dots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} }
     @media (prefers-color-scheme: light) {
       #ai-summary-box { background:#fff; border-color:#e0e0e0; }
       #ai-summary-box .ai-content,
@@ -217,7 +192,8 @@
       #ai-summary-box .ai-source-tag { color:#555; border-color:rgba(0,0,0,0.1); }
       #ai-summary-box .ai-expanded { border-top-color:rgba(0,0,0,0.08); }
       #ai-summary-box .ai-followup-item { border-bottom-color:rgba(0,0,0,0.07); }
-      #ai-summary-box .ai-spinner { border-color:#eee; border-top-color:#4285f4; }
+      #ai-summary-box .ai-spinner,
+      #ai-summary-box .ai-gen-spinner { border-color:#eee; border-top-color:#4285f4; }
       #ai-summary-box .ai-footer { color:#999; }
     }
     [data-theme="light"] #ai-summary-box { background:#fff; border-color:#e0e0e0; }
@@ -225,7 +201,7 @@
     [data-theme="light"] #ai-summary-box .ai-overview { color:#1f1f1f; }
   `;
 
-  // ── Utils ─────────────────────────────────────────────────────────────────
+  // ── Utilities ──────────────────────────────────────────────────────────────
 
   function injectStyles() {
     if (document.getElementById("ai-summary-styles")) return;
@@ -255,54 +231,39 @@
     return out;
   }
 
-  function findInsertTarget() {
-    for (const sel of ["#urls", "#main_results", "#results"]) {
-      const el = document.querySelector(sel);
-      if (el) return el;
+  // ── Body-level insertion ───────────────────────────────────────────────────
+  // We insert our wrapper DIRECTLY INTO BODY before #main_results.
+  // SearXNG never replaces body or main_results — it only updates elements
+  // INSIDE main_results. This means our wrapper can never be removed by SearXNG.
+
+  function insertWrapper(wrapper) {
+    // Remove any existing wrapper first to avoid duplicates
+    const existing = document.getElementById("ai-summary-wrapper");
+    if (existing && existing !== wrapper) existing.remove();
+
+    const main = document.getElementById("main_results");
+    if (!main) return false;
+
+    // Insert directly before #main_results in body
+    main.parentNode.insertBefore(wrapper, main);
+
+    // Copy #main_results layout so our box appears in the same column
+    // Use padding-left to match the results column position
+    const urlsEl = document.getElementById("urls");
+    if (urlsEl) {
+      const rect = urlsEl.getBoundingClientRect();
+      const mainRect = main.getBoundingClientRect();
+      wrapper.style.paddingLeft  = (rect.left - mainRect.left) + "px";
+      wrapper.style.paddingRight = (mainRect.right - rect.right) + "px";
+      wrapper.style.marginBottom = "-16px"; // remove gap between wrapper and main_results
     }
-    const first = document.querySelector(".result");
-    return first ? first.parentElement : null;
-  }
 
-  // Watch for our box being removed from the DOM by SearXNG's own JS
-  // (SearXNG re-renders the results area after all engines respond,
-  //  which can destroy elements we inserted)
-  function watchBox(box, target) {
-    const observer = new MutationObserver(() => {
-      if (!document.body.contains(box)) {
-        // Box was removed — re-insert it
-        const newTarget = findInsertTarget();
-        if (newTarget) {
-          newTarget.insertAdjacentElement("beforebegin", box);
-        }
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    // Stop watching after 30s (SearXNG should be stable by then)
-    setTimeout(() => observer.disconnect(), 30000);
-    return observer;
-  }
-
-  function esc(s) {
-    return String(s || "")
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-  }
-
-  function linkify(text) {
-    return esc(text).replace(
-      /(https?:\/\/[^\s<>"]+)/g,
-      '<a href="$1" target="_blank" rel="noopener" ' +
-      'style="color:inherit;text-decoration:underline;opacity:0.8;">$1</a>'
-    );
-  }
-
-  function hostnameOf(url) {
-    try { return new URL(url).hostname.replace(/^www\./, ""); }
-    catch { return ""; }
+    return true;
   }
 
   // ── SSE stream reader ─────────────────────────────────────────────────────
+  // Handles both true streaming AND nginx-buffered (all-at-once) delivery.
+  // Robustly strips \r, BOM, and other proxy artifacts before JSON.parse.
 
   async function readStream(url, body, onChunk, onDone, onError) {
     try {
@@ -314,29 +275,63 @@
       if (!resp.ok) throw new Error("HTTP " + resp.status);
 
       const reader = resp.body.getReader();
-      const dec = new TextDecoder();
+      const dec = new TextDecoder("utf-8");
       let buf = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
+
         const lines = buf.split("\n");
-        buf = lines.pop();
+        buf = lines.pop() || ""; // keep incomplete last line
+
         for (const line of lines) {
-          const t = line.trim();
+          // Strip carriage returns and BOM that proxies sometimes add
+          const t = line.replace(/\r/g, "").trim();
           if (!t.startsWith("data:")) continue;
+
           const raw = t.slice(5).trim();
-          if (raw === "[DONE]") { onDone(); return; }
-          try { const txt = JSON.parse(raw); if (txt) onChunk(txt); }
-          catch (_) {}
+          if (!raw || raw === "[DONE]") {
+            if (raw === "[DONE]") { onDone(); return; }
+            continue;
+          }
+
+          // Try JSON.parse — the value should be a quoted string like "Hello"
+          try {
+            const txt = JSON.parse(raw);
+            if (typeof txt === "string" && txt) onChunk(txt);
+          } catch (_) {
+            // Proxy might strip JSON quotes and send raw text — use as-is
+            if (raw && raw !== "[DONE]") onChunk(raw);
+          }
         }
       }
       onDone();
-    } catch (err) { onError(err); }
+    } catch (err) {
+      onError(err);
+    }
   }
 
-  // ── Code block ────────────────────────────────────────────────────────────
+  // ── Code block renderer ───────────────────────────────────────────────────
+
+  function esc(s) {
+    return String(s || "")
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function linkify(text) {
+    return esc(text).replace(
+      /(https?:\/\/[^\s<>"]+)/g,
+      '<a href="$1" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;opacity:0.8;">$1</a>'
+    );
+  }
+
+  function hostnameOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ""); }
+    catch { return ""; }
+  }
 
   function renderCodeBlock(lang, code) {
     const id = "cb" + Math.random().toString(36).slice(2, 9);
@@ -369,41 +364,13 @@
     return `<div class="ai-item-text">${linkify(item.value || "")}</div>`;
   }
 
-  function renderSection(sec) {
-    const items = (sec.items || []).map(renderItem).join("");
-    return `<div class="ai-section ai-block">
-      <div class="ai-section-title">${esc(sec.title || "")}</div>
-      ${items}
-    </div>`;
-  }
-
-  function renderSources(results) {
-    const seen = new Set(), tags = [];
-    for (const r of results.slice(0, 4)) {
-      const h = hostnameOf(r.url);
-      if (!h || seen.has(h)) continue;
-      seen.add(h);
-      tags.push(`<a class="ai-source-tag" href="${esc(r.url)}" target="_blank" rel="noopener">
-        <span style="opacity:0.5;font-size:0.8em">○</span> ${esc(h)}</a>`);
-    }
-    return tags.length ? `<div class="ai-sources ai-block">${tags.join("")}</div>` : "";
-  }
-
-  // ── Progressive JSON parser ───────────────────────────────────────────────
-  //
-  // As JSON streams in we track which top-level fields are complete and
-  // append them to the panel immediately — overview first, then each
-  // section as its closing `}` arrives, then follow-up questions.
-  //
-  // Strategy: use regex on the buffer to extract completed values.
+  // ── Progressive JSON renderer for More panel ──────────────────────────────
 
   function makeProgressiveRenderer(panel, results) {
     let rendered = { overview: false, sources: false, sections: 0, followup: false };
 
     return function update(buffer) {
-      // ── 1. Overview ───────────────────────────────────────────────────
       if (!rendered.overview) {
-        // Match "overview":"...complete string..." — ends at unescaped "
         const m = buffer.match(/"overview"\s*:\s*"((?:[^"\\]|\\.)*)"/);
         if (m) {
           rendered.overview = true;
@@ -414,38 +381,43 @@
         }
       }
 
-      // ── 2. Source tags (once after overview) ─────────────────────────
       if (rendered.overview && !rendered.sources) {
         rendered.sources = true;
-        const src = renderSources(results);
-        if (src) {
+        const seen = new Set(), tags = [];
+        for (const r of results.slice(0, 4)) {
+          const h = hostnameOf(r.url);
+          if (!h || seen.has(h)) continue;
+          seen.add(h);
+          tags.push(`<a class="ai-source-tag" href="${esc(r.url)}" target="_blank" rel="noopener">
+            <span style="opacity:0.5;font-size:0.8em">○</span> ${esc(h)}</a>`);
+        }
+        if (tags.length) {
           const el = document.createElement("div");
-          el.innerHTML = src;
-          panel.appendChild(el.firstElementChild);
+          el.className = "ai-sources ai-block";
+          el.innerHTML = tags.join("");
+          panel.appendChild(el);
         }
       }
 
-      // ── 3. Sections — extract completed section objects ───────────────
-      // Find the "sections" array content and extract complete {...} objects
       const secArrayMatch = buffer.match(/"sections"\s*:\s*\[([\s\S]*)/);
       if (secArrayMatch) {
-        const arrContent = secArrayMatch[1];
-        // Extract all complete {...} objects (balanced braces)
         let depth = 0, start = -1, count = 0;
-        for (let i = 0; i < arrContent.length; i++) {
-          const ch = arrContent[i];
-          if (ch === "{") { if (depth === 0) start = i; depth++; }
-          else if (ch === "}") {
+        const arr = secArrayMatch[1];
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] === "{") { if (!depth) start = i; depth++; }
+          else if (arr[i] === "}") {
             depth--;
-            if (depth === 0 && start !== -1) {
+            if (!depth && start !== -1) {
               count++;
               if (count > rendered.sections) {
-                // New complete section found — try to parse it
                 try {
-                  const sec = JSON.parse(arrContent.slice(start, i + 1));
+                  const sec = JSON.parse(arr.slice(start, i + 1));
                   rendered.sections = count;
                   const el = document.createElement("div");
-                  el.innerHTML = renderSection(sec);
+                  el.innerHTML = `<div class="ai-section ai-block">
+                    <div class="ai-section-title">${esc(sec.title || "")}</div>
+                    ${(sec.items || []).map(renderItem).join("")}
+                  </div>`;
                   panel.appendChild(el.firstElementChild);
                 } catch (_) {}
               }
@@ -455,7 +427,6 @@
         }
       }
 
-      // ── 4. Follow-up questions ────────────────────────────────────────
       if (!rendered.followup) {
         const fuMatch = buffer.match(/"follow_up"\s*:\s*(\[[^\]]*\])/);
         if (fuMatch) {
@@ -475,7 +446,7 @@
     };
   }
 
-  // ── Box builders ──────────────────────────────────────────────────────────
+  // ── Box construction ──────────────────────────────────────────────────────
 
   function createBox() {
     const box = document.createElement("div");
@@ -496,12 +467,10 @@
 
     const more = document.createElement("button");
     more.className = "ai-more-btn";
-    more.id = "ai-more-btn";
     more.innerHTML = `More <span class="ai-chevron">▾</span>`;
 
     const panel = document.createElement("div");
     panel.className = "ai-expanded";
-    panel.id = "ai-expanded";
 
     const footer = document.createElement("div");
     footer.className = "ai-footer";
@@ -521,58 +490,24 @@
     });
   }
 
-  // ── Stream compact summary (smooth typewriter) ────────────────────────────
-  //
-  // Tokens from the LLM arrive at uneven intervals (a burst then a pause).
-  // Instead of rendering each token directly we push every character into
-  // a queue and drain it at a fixed 18ms/char interval — giving a smooth,
-  // even typing speed no matter how fast or slow the model responds.
+  // ── Smooth typewriter ─────────────────────────────────────────────────────
 
   function streamCompact(box, query, results) {
     const contentEl = box.querySelector(".ai-content");
-
-    let fullText  = "";   // complete text received so far
-    let displayed = "";   // text already typed onto screen
-    let queue     = [];   // characters waiting to be typed
-    let streamDone = false;
-    let timerID   = null;
+    let queue = [], displayed = "", streamDone = false, timerID = null;
 
     function tick() {
-      if (queue.length === 0) {
+      if (!queue.length) {
         if (streamDone) {
-          // Safety check: if the box was removed from DOM by SearXNG's JS,
-          // re-insert the wrapper before finalising
-          const wrapper = document.getElementById("ai-summary-wrapper");
-          if (wrapper && !document.body.contains(wrapper)) {
-            const t = findInsertTarget();
-            if (t) t.insertAdjacentElement("beforebegin", wrapper);
-          }
-
           contentEl.innerHTML = linkify(displayed);
           if (displayed.trim()) addMoreButton(box, results);
-          else {
-            // Don't remove if box has content mid-stream (race condition guard)
-            if (!displayed) box.closest("#ai-summary-wrapper")?.remove();
-          }
           return;
         }
-        // Queue empty but stream still going — wait briefly
         timerID = setTimeout(tick, 16);
         return;
       }
-
-      // Drain chars at LLM speed:
-      // If queue is building up (LLM is fast), drain more chars per tick
-      // so the display keeps pace. If queue is small, drain just 1-2.
-      const charsPerTick = queue.length > 60 ? 8
-                         : queue.length > 30 ? 4
-                         : queue.length > 10 ? 2
-                         : 1;
-
-      for (let i = 0; i < charsPerTick && queue.length; i++) {
-        displayed += queue.shift();
-      }
-
+      const charsPerTick = queue.length > 60 ? 8 : queue.length > 30 ? 4 : queue.length > 10 ? 2 : 1;
+      for (let i = 0; i < charsPerTick && queue.length; i++) displayed += queue.shift();
       contentEl.innerHTML = linkify(displayed) + '<span class="ai-cursor"></span>';
       timerID = setTimeout(tick, 16);
     }
@@ -581,38 +516,35 @@
       "/ai_summary",
       { query, results: results.slice(0, 5) },
       (chunk) => {
-        // Push every character of the chunk into the queue
         for (const ch of chunk) queue.push(ch);
-        fullText += chunk;
-        // Start the ticker on first chunk
-        if (!timerID) timerID = setTimeout(tick, 18);
+        if (!timerID) timerID = setTimeout(tick, 16);
       },
       () => {
         streamDone = true;
-        if (!timerID) timerID = setTimeout(tick, 18);
+        if (!timerID) timerID = setTimeout(tick, 16);
       },
-      (err) => { console.warn("ai_summary:", err); box.remove(); }
+      (err) => {
+        console.warn("ai_summary compact error:", err);
+        // Show error message instead of silent disappear
+        contentEl.innerHTML = '<span style="color:#888;font-size:0.83rem">Could not load summary.</span>';
+      }
     );
   }
 
-  // ── Stream More panel (progressive render) ────────────────────────────────
+  // ── Stream More panel ─────────────────────────────────────────────────────
 
   function streamMore(panel, results) {
-    // Initial full-panel spinner — shown before first content arrives
     const initSpinner = document.createElement("div");
     initSpinner.className = "ai-loading";
     initSpinner.innerHTML = `<div class="ai-spinner"></div> Loading detailed summary…`;
     panel.appendChild(initSpinner);
 
-    // Sticky "Generating..." bar — appended to panel, stays at bottom
-    // while streaming, removed when done
     const genBar = document.createElement("div");
     genBar.className = "ai-generating";
     genBar.innerHTML = `<div class="ai-gen-spinner"></div>
       <span>Generating<span class="ai-gen-dots"></span></span>`;
 
-    let buffer = "";
-    let firstChunk = true;
+    let buffer = "", firstChunk = true;
     const update = makeProgressiveRenderer(panel, results);
 
     readStream(
@@ -620,62 +552,49 @@
       { query: getQuery(), results: results.slice(0, 5) },
       (chunk) => {
         buffer += chunk;
-
-        // On first chunk: swap init spinner for the sticky gen bar
-        if (firstChunk) {
-          firstChunk = false;
-          if (initSpinner.parentNode) initSpinner.remove();
-          panel.appendChild(genBar);
-        }
-
-        // Render new content, then re-append genBar so it stays at bottom
+        if (firstChunk) { firstChunk = false; if (initSpinner.parentNode) initSpinner.remove(); panel.appendChild(genBar); }
         update(buffer);
         panel.appendChild(genBar);
       },
       () => {
-        // Stream finished — remove init spinner and gen bar
         if (initSpinner.parentNode) initSpinner.remove();
         if (genBar.parentNode) genBar.remove();
-
-        // Final pass
         update(buffer);
-
-        if (!panel.children.length) {
-          panel.innerHTML = `<p class="ai-overview">${linkify(buffer)}</p>`;
-        }
+        if (!panel.children.length) panel.innerHTML = `<p class="ai-overview">${linkify(buffer)}</p>`;
       },
       (err) => {
-        console.warn("ai_summary_more:", err);
+        console.warn("ai_summary more error:", err);
         if (initSpinner.parentNode) initSpinner.remove();
         if (genBar.parentNode) genBar.remove();
-        panel.innerHTML = `<p style="color:#888;font-size:0.83rem;padding:8px 0">
-          Could not load detailed summary. Please try again.</p>`;
+        panel.innerHTML = `<p style="color:#888;font-size:0.83rem;padding:8px 0">Could not load. Please try again.</p>`;
       }
     );
   }
 
   // ── Main ──────────────────────────────────────────────────────────────────
 
-  async function run() {
-    const target = findInsertTarget();
-    if (!target) return;
+  function run() {
+    // Bail if no results on this page
+    if (!document.getElementById("urls") && !document.querySelector(".result")) return;
+
     const query = getQuery();
     if (!query) return;
+
     const results = collectResults();
     if (!results.length) return;
 
+    // Don't run twice on the same page
+    if (document.getElementById("ai-summary-wrapper")) return;
+
     injectStyles();
 
-    // Wrap box in a stable container div so SearXNG re-renders
-    // don't directly affect it
     const wrapper = document.createElement("div");
     wrapper.id = "ai-summary-wrapper";
     const box = createBox();
     wrapper.appendChild(box);
-    target.insertAdjacentElement("beforebegin", wrapper);
 
-    // Watch for wrapper being removed and re-insert if needed
-    watchBox(wrapper, target);
+    // Insert into body before #main_results — body is never replaced by SearXNG
+    if (!insertWrapper(wrapper)) return;
 
     streamCompact(box, query, results);
   }
