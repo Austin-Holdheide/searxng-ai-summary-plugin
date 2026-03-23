@@ -42,19 +42,38 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMPT = (
-    "You are a helpful assistant in a search engine. "
-    "Write a concise 3-5 sentence summary answering the query. "
-    "No markdown. No 'Based on the results.'"
+    """ You are a helpful assistant embedded in a search engine.
+    The user searched for a query and you are given the top search results.
+    Write a concise, factual summary (3-5 sentences) that directly answers
+    the query using the provided results.
+    Do NOT start with "Based on the results" or "The search results say" or "The user is asking for" similar meta-phrases.
+    Do NOT use markdown formatting.
+    If the results are unrelated to the query, say you could not find a clear answer."""
 )
 
 _DEFAULT_PROMPT_MORE = (
-    "You are a helpful assistant in a search engine. "
-    "Return ONLY valid JSON — no markdown fences, no explanation. "
-    'Shape: {"overview":"paragraph","sections":[{"title":"Title","items":['
-    '{"type":"text","value":"bullet"},{"type":"code","lang":"bash","value":"cmd"}'
-    ']}],"follow_up":["Q1?","Q2?","Q3?"]} '
-    "Use type=code for commands with correct lang. type=text for plain bullets. "
-    "2-4 sections, 2-5 items. Exactly 3 follow_up questions."
+    """ You are a helpful assistant in a search engine.
+    Return ONLY valid JSON — no markdown fences, no explanation, just raw JSON.
+    Use exactly this shape:
+    {"overview": "2-3 sentence intro paragraph",
+    "sections": [
+     {"title": "Section Title",
+      "items": [
+        {"type": "text", "value": "A plain bullet point"},
+        {"type": "code", "lang": "bash", "value": "the command or code here"}
+      ]}
+     ],
+     "follow_up": ["Follow-up question 1?", "Follow-up question 2?", "Follow-up question 3?"]}
+     Rules:
+     - Use 2-4 sections with 2-5 items each.
+    - Use type "text" for the vast majority of items — plain factual bullet points.
+    - ONLY use type "code" when the item IS an actual programming command or shell command
+     that a developer would literally run in a terminal. Examples of when to use code:
+    "sudo apt install apache2", "git clone https://...", "npm install".
+     - NEVER use type "code" for: URLs, website addresses, phone numbers, addresses,
+    schedules, prices, names, quotes, or any plain information — use type "text" instead.
+     - Keep follow_up to exactly 3 questions.
+     - Return ONLY the JSON object. Nothing else."""
 )
 
 
@@ -187,7 +206,7 @@ class SXNGPlugin(Plugin):
 
             model         = _setting("model")
             max_tokens    = int(_setting("max_tokens", 300))
-            system_prompt = _setting("system_prompt") or _DEFAULT_PROMPT
+            system_prompt = _DEFAULT_PROMPT
 
             if not _setting("base_url") or not model:
                 logger.error("ai_summary: base_url or model missing from settings.yml")
@@ -228,7 +247,7 @@ class SXNGPlugin(Plugin):
 
             model_more    = _setting("model_more") or _setting("model")
             max_tokens    = int(_setting("max_tokens_more", 800))
-            system_prompt = _setting("system_prompt_more") or _DEFAULT_PROMPT_MORE
+            system_prompt =  _DEFAULT_PROMPT_MORE
 
             if not _setting("base_url") or not model_more:
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
