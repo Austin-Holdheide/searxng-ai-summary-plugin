@@ -284,18 +284,14 @@ class SXNGPlugin(Plugin):
         Cache the search results so the GET endpoint can use them
         without any internal HTTP call or bot detection issues.
         The client only ever sends the query string — never result data.
+        Category filtering is handled client-side by isGeneralTab() in
+        ai_summary.js, which reads the URL param directly.
         """
         if search.search_query.pageno > 1:
             return []
 
         query = search.search_query.query
         if not query:
-            return []
-
-        # Only cache results for general searches — no point summarising
-        # image, video, news, or other specialised category results.
-        categories = getattr(search.search_query, "categories", None) or []
-        if categories and "general" not in [c.lower() for c in categories]:
             return []
 
         results = []
