@@ -579,12 +579,17 @@
   // When the param is absent or "general" we should proceed.
 
   function isGeneralTab() {
-    const params = new URLSearchParams(window.location.search);
-    const cat = params.get("categories") || params.get("category") || "";
-    // If a non-general category is explicitly set in the URL, bail out.
-    if (cat && cat.toLowerCase() !== "general") return false;
-    // Otherwise (no param, or param == "general") show the summary.
-    return true;
+    // SearXNG's simple theme adds `active_category` to the active tab link,
+    // and each tab also has a class like `category_general`, `category_images`.
+    // If the active tab has `category_general` we're on the right tab.
+    const activeTab = document.querySelector(".active_category");
+    if (activeTab) {
+      return activeTab.classList.contains("category_general");
+    }
+
+    // Fallback: check the URL categories param if the DOM check found nothing.
+    const cat = new URLSearchParams(window.location.search).get("categories") || "";
+    return !cat || cat.toLowerCase() === "general";
   }
 
   // ── Main ──────────────────────────────────────────────────────────────────
