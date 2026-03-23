@@ -373,7 +373,7 @@
 
     return function update(buffer) {
       if (!rendered.overview) {
-        const m = buffer.match(/"overview"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        const m = buffer.match(/"overview"\s*:\s*"((?:[^"\\]|\\.)*)"/); 
         if (m) {
           rendered.overview = true;
           const el = document.createElement("div");
@@ -573,11 +573,35 @@
     );
   }
 
+  // ── Category check ────────────────────────────────────────────────────────
+  // Only show the summary on the General tab. SearXNG passes the active
+  // category via the `categories` URL param (e.g. ?q=foo&categories=images).
+  // When the param is absent or "general" we should proceed.
+
+  function isGeneralTab() {
+    const params = new URLSearchParams(window.location.search);
+    const cat = params.get("categories") || params.get("category") || "";
+    if (cat && cat.toLowerCase() !== "general") return false;
+
+    // Double-check the active tab element as a fallback (SearXNG marks the
+    // active tab with aria-current="page" on the category <a> element).
+    const activeTab = document.querySelector(".category_bar a[aria-current='page'], #categories a[aria-current='page']");
+    if (activeTab) {
+      const label = (activeTab.textContent || "").trim().toLowerCase();
+      if (label && label !== "general") return false;
+    }
+
+    return true;
+  }
+
   // ── Main ──────────────────────────────────────────────────────────────────
 
   function run() {
     // Bail if no results on this page
     if (!document.getElementById("urls") && !document.querySelector(".result")) return;
+
+    // Only run on the General search tab
+    if (!isGeneralTab()) return;
 
     const query = getQuery();
     if (!query) return;
