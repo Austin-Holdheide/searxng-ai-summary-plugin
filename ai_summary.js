@@ -581,16 +581,9 @@
   function isGeneralTab() {
     const params = new URLSearchParams(window.location.search);
     const cat = params.get("categories") || params.get("category") || "";
+    // If a non-general category is explicitly set in the URL, bail out.
     if (cat && cat.toLowerCase() !== "general") return false;
-
-    // Double-check the active tab element as a fallback (SearXNG marks the
-    // active tab with aria-current="page" on the category <a> element).
-    const activeTab = document.querySelector(".category_bar a[aria-current='page'], #categories a[aria-current='page']");
-    if (activeTab) {
-      const label = (activeTab.textContent || "").trim().toLowerCase();
-      if (label && label !== "general") return false;
-    }
-
+    // Otherwise (no param, or param == "general") show the summary.
     return true;
   }
 
