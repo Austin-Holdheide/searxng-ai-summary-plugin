@@ -579,17 +579,28 @@
   // When the param is absent or "general" we should proceed.
 
   function isGeneralTab() {
-    // SearXNG's simple theme adds `active_category` to the active tab link,
-    // and each tab also has a class like `category_general`, `category_images`.
-    // If the active tab has `category_general` we're on the right tab.
+    const params = new URLSearchParams(window.location.search);
+
+    // SearXNG uses `categories=images` style params on tab switches.
+    const cat = params.get("categories") || params.get("category") || "";
+    if (cat && cat.toLowerCase() !== "general") return false;
+
+    // Some SearXNG versions use per-category boolean params like
+    // `category_images=1`, `category_videos=1`, etc.
+    const nonGeneral = ["images","videos","news","map","music","it","science","files","social+media","social_media"];
+    for (const c of nonGeneral) {
+      if (params.get("category_" + c) === "1") return false;
+    }
+
+    // DOM check: SearXNG simple theme marks each tab <a> with class
+    // `category_general`, `category_images` etc. AND adds `active_category`
+    // to the currently active one. If ANY non-general tab is active, bail.
     const activeTab = document.querySelector(".active_category");
     if (activeTab) {
       return activeTab.classList.contains("category_general");
     }
 
-    // Fallback: check the URL categories param if the DOM check found nothing.
-    const cat = new URLSearchParams(window.location.search).get("categories") || "";
-    return !cat || cat.toLowerCase() === "general";
+    return true;
   }
 
   // ── Main ──────────────────────────────────────────────────────────────────
