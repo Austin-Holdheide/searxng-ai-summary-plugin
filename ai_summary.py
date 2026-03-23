@@ -292,6 +292,12 @@ class SXNGPlugin(Plugin):
         if not query:
             return []
 
+        # Only cache results for general searches — no point summarising
+        # image, video, news, or other specialised category results.
+        categories = getattr(search.search_query, "categories", None) or []
+        if categories and "general" not in [c.lower() for c in categories]:
+            return []
+
         results = []
         for r in search.result_container.get_ordered_results():
             content = _read(r, "content")
