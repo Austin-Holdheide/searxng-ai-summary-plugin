@@ -46,7 +46,7 @@ _DEFAULT_PROMPT = (
     The user searched for a query and you are given the top search results.
     Write a concise, factual summary (3-5 sentences) that directly answers
     the query using the provided results.
-    Do NOT start with "Based on the results" or "The search results say" or "The user is asking for" similar meta-phrases.
+    Do NOT start with "Based on the results" or "The search results say" or "The user is asking for" or "The user is attempting to" or "The provided search results offer" similar meta-phrases.
     Do NOT use markdown formatting.
     If the results are unrelated to the query, say you could not find a clear answer."""
 )
@@ -198,9 +198,11 @@ class SXNGPlugin(Plugin):
         from flask import request as freq, Response, stream_with_context
 
         # ── Compact summary endpoint ─────────────────────────────────────
+        _MAX_QUERY_LEN = 500
+
         @app.route("/ai_summary", methods=["GET"])
         def ai_summary_api():
-            query = freq.args.get("q", "").strip()
+            query = freq.args.get("q", "").strip()[:_MAX_QUERY_LEN]
             if not query:
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
 
@@ -241,7 +243,7 @@ class SXNGPlugin(Plugin):
         # ── More panel endpoint ──────────────────────────────────────────
         @app.route("/ai_summary_more", methods=["GET"])
         def ai_summary_more_api():
-            query = freq.args.get("q", "").strip()
+            query = freq.args.get("q", "").strip()[:_MAX_QUERY_LEN]
             if not query:
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
 
@@ -282,8 +284,7 @@ class SXNGPlugin(Plugin):
                     return response
                 # Cache-busting version param — changes every minute so updates
                 # are picked up quickly without waiting for the hourly rollover.
-                import time as _time
-                _v = str(int(_time.time() // 60))
+                _v = str(int(time.time() // 60))
                 script = f'\n<script src="/static/themes/simple/js/ai_summary.js?v={_v}"></script>'
                 body = body.replace("</body>", script + "\n</body>")
                 response.set_data(body)
