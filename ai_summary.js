@@ -438,8 +438,16 @@
               rendered.followup = true;
               const wrap = document.createElement("div");
               wrap.className = "ai-block";
-              wrap.innerHTML = `<div class="ai-followup-title">Explore More</div>` +
-                questions.map(q => `<div class="ai-followup-item">${esc(q)}</div>`).join("");
+              const title = document.createElement("div");
+              title.className = "ai-followup-title";
+              title.textContent = "Explore More";
+              wrap.appendChild(title);
+              questions.forEach(function(q) {
+                const item = document.createElement("div");
+                item.className = "ai-followup-item";
+                item.textContent = q;
+                wrap.appendChild(item);
+              });
               panel.appendChild(wrap);
             }
           } catch (_) {}
