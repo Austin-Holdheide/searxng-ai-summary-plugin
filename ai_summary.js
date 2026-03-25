@@ -418,94 +418,88 @@
   }
 
   // ── Progressive JSON renderer for More panel ──────────────────────────────
+  // Accumulates the full streamed payload and parses it once with JSON.parse()
+  // when the stream ends (isDone=true).  Regex/brace-counting approaches are
+  // not used because they silently misparse strings that contain special
+  // characters, escaped braces, or Unicode sequences.
 
   function makeProgressiveRenderer(panel, results) {
-    let rendered = { overview: false, sources: false, sections: 0, followup: false };
+    let rendered = false;
 
-    return function update(buffer) {
-      if (!rendered.overview) {
-        const m = buffer.match(/"overview"\s*:\s*"((?:[^"\\]|\\.)*)"/); 
-        if (m) {
-          rendered.overview = true;
+    return function update(buffer, isDone) {
+      // Only render once the complete payload has arrived so that JSON.parse()
+      // receives a well-formed document.  The generating-spinner shown by the
+      // caller already provides visual feedback while data streams in.
+      if (!isDone || rendered) return;
+      rendered = true;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(buffer);
+      } catch (_) {
+        // If the payload is not valid JSON (e.g. the model returned plain text
+        // or the stream was truncated), fall back to displaying the raw text.
+        const p = document.createElement("p");
+        p.className = "ai-overview";
+        setLinkified(p, buffer);
+        panel.appendChild(p);
+        return;
+      }
+
+      // overview
+      if (parsed.overview) {
+        const el = document.createElement("div");
+        el.className = "ai-block";
+        const p = document.createElement("p");
+        p.className = "ai-overview";
+        setLinkified(p, parsed.overview);
+        el.appendChild(p);
+        panel.appendChild(el);
+      }
+
+      // source tags (derived from results, not from the LLM payload)
+      const seen = new Set(), tags = [];
+      for (const r of results.slice(0, 4)) {
+        const h = hostnameOf(r.url);
+        if (!h || seen.has(h)) continue;
+        seen.add(h);
+        tags.push(`<a class="ai-source-tag" href="${esc(r.url)}" target="_blank" rel="noopener">
+          <span style="opacity:0.5;font-size:0.8em">○</span> ${esc(h)}</a>`);
+      }
+      if (tags.length) {
+        const el = document.createElement("div");
+        el.className = "ai-sources ai-block";
+        el.innerHTML = tags.join("");
+        panel.appendChild(el);
+      }
+
+      // sections
+      if (Array.isArray(parsed.sections)) {
+        for (const sec of parsed.sections) {
           const el = document.createElement("div");
-          el.className = "ai-block";
-          const p = document.createElement("p");
-          p.className = "ai-overview";
-          setLinkified(p, m[1]);
-          el.appendChild(p);
-          panel.appendChild(el);
+          el.innerHTML = `<div class="ai-section ai-block">
+            <div class="ai-section-title">${esc(sec.title || "")}</div>
+            ${(sec.items || []).map(renderItem).join("")}
+          </div>`;
+          panel.appendChild(el.firstElementChild);
         }
       }
 
-      if (rendered.overview && !rendered.sources) {
-        rendered.sources = true;
-        const seen = new Set(), tags = [];
-        for (const r of results.slice(0, 4)) {
-          const h = hostnameOf(r.url);
-          if (!h || seen.has(h)) continue;
-          seen.add(h);
-          tags.push(`<a class="ai-source-tag" href="${esc(r.url)}" target="_blank" rel="noopener">
-            <span style="opacity:0.5;font-size:0.8em">○</span> ${esc(h)}</a>`);
-        }
-        if (tags.length) {
-          const el = document.createElement("div");
-          el.className = "ai-sources ai-block";
-          el.innerHTML = tags.join("");
-          panel.appendChild(el);
-        }
-      }
-
-      const secArrayMatch = buffer.match(/"sections"\s*:\s*\[([\s\S]*)/);
-      if (secArrayMatch) {
-        let depth = 0, start = -1, count = 0;
-        const arr = secArrayMatch[1];
-        for (let i = 0; i < arr.length; i++) {
-          if (arr[i] === "{") { if (!depth) start = i; depth++; }
-          else if (arr[i] === "}") {
-            depth--;
-            if (!depth && start !== -1) {
-              count++;
-              if (count > rendered.sections) {
-                try {
-                  const sec = JSON.parse(arr.slice(start, i + 1));
-                  rendered.sections = count;
-                  const el = document.createElement("div");
-                  el.innerHTML = `<div class="ai-section ai-block">
-                    <div class="ai-section-title">${esc(sec.title || "")}</div>
-                    ${(sec.items || []).map(renderItem).join("")}
-                  </div>`;
-                  panel.appendChild(el.firstElementChild);
-                } catch (_) {}
-              }
-              start = -1;
-            }
-          }
-        }
-      }
-
-      if (!rendered.followup) {
-        const fuMatch = buffer.match(/"follow_up"\s*:\s*(\[[^\]]*\])/);
-        if (fuMatch) {
-          try {
-            const questions = JSON.parse(fuMatch[1]);
-            if (Array.isArray(questions) && questions.length) {
-              rendered.followup = true;
-              const wrap = document.createElement("div");
-              wrap.className = "ai-block";
-              const title = document.createElement("div");
-              title.className = "ai-followup-title";
-              title.textContent = "Explore More";
-              wrap.appendChild(title);
-              questions.forEach(function(q) {
-                const item = document.createElement("div");
-                item.className = "ai-followup-item";
-                item.textContent = q;
-                wrap.appendChild(item);
-              });
-              panel.appendChild(wrap);
-            }
-          } catch (_) {}
-        }
+      // follow-up questions
+      if (Array.isArray(parsed.follow_up) && parsed.follow_up.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "ai-block";
+        const title = document.createElement("div");
+        title.className = "ai-followup-title";
+        title.textContent = "Explore More";
+        wrap.appendChild(title);
+        parsed.follow_up.forEach(function(q) {
+          const item = document.createElement("div");
+          item.className = "ai-followup-item";
+          item.textContent = q;
+          wrap.appendChild(item);
+        });
+        panel.appendChild(wrap);
       }
     };
   }
@@ -620,19 +614,13 @@
       (chunk) => {
         buffer += chunk;
         if (firstChunk) { firstChunk = false; if (initSpinner.parentNode) initSpinner.remove(); panel.appendChild(genBar); }
-        update(buffer);
+        update(buffer, false);
         panel.appendChild(genBar);
       },
       () => {
         if (initSpinner.parentNode) initSpinner.remove();
         if (genBar.parentNode) genBar.remove();
-        update(buffer);
-        if (!panel.children.length) {
-          const p = document.createElement("p");
-          p.className = "ai-overview";
-          setLinkified(p, buffer);
-          panel.appendChild(p);
-        }
+        update(buffer, true);
       },
       (err) => {
         console.warn("ai_summary more error:", err);
