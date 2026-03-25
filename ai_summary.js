@@ -265,6 +265,8 @@
   // Robustly strips \r, BOM, and other proxy artifacts before JSON.parse.
 
   async function readStream(url, body, onChunk, onDone, onError) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 s timeout
     try {
       // GET request — only the query string is sent to the server.
       // The server fetches its own results internally so the client
@@ -273,6 +275,7 @@
       const resp = await fetch(url + "?" + params.toString(), {
         method: "GET",
         headers: { "Accept": "text/event-stream" },
+        signal: controller.signal,
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
 
@@ -312,6 +315,8 @@
       onDone();
     } catch (err) {
       onError(err);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
