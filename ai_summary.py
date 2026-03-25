@@ -103,17 +103,22 @@ def _read(result, key: str) -> str:
 _cache: dict = {}          # {"query": {"results": [...], "ts": float}}
 _cache_lock = threading.Lock()
 _CACHE_TTL  = 300          # seconds
+_CACHE_MAX  = 500          # maximum number of cached entries
 
 
 def _cache_set(query: str, results: list):
     key = query.lower().strip()
     with _cache_lock:
-        _cache[key] = {"results": results, "ts": time.time()}
         # Evict entries older than TTL
         now = time.time()
-        expired = [k for k, v in _cache.items() if now - v["ts"] > _CACHE_TTL]
+        expired = [k for k, v in list(_cache.items()) if now - v["ts"] > _CACHE_TTL]
         for k in expired:
             del _cache[k]
+        # Enforce maximum cache size — evict oldest entry if at capacity
+        if key not in _cache and len(_cache) >= _CACHE_MAX:
+            oldest = min(_cache, key=lambda k: _cache[k]["ts"])
+            del _cache[oldest]
+        _cache[key] = {"results": results, "ts": now}
 
 
 def _cache_get(query: str) -> list:

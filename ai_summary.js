@@ -265,6 +265,8 @@
   // Robustly strips \r, BOM, and other proxy artifacts before JSON.parse.
 
   async function readStream(url, body, onChunk, onDone, onError) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 s timeout
     try {
       // GET request — only the query string is sent to the server.
       // The server fetches its own results internally so the client
@@ -273,6 +275,7 @@
       const resp = await fetch(url + "?" + params.toString(), {
         method: "GET",
         headers: { "Accept": "text/event-stream" },
+        signal: controller.signal,
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
 
@@ -312,6 +315,8 @@
       onDone();
     } catch (err) {
       onError(err);
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -328,6 +333,52 @@
       /(https?:\/\/[^\s<>"]+)/g,
       '<a href="$1" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;opacity:0.8;">$1</a>'
     );
+  }
+
+  // Safe DOM-based alternative to linkify() — builds a DocumentFragment of
+  // text nodes and anchor elements without ever touching innerHTML, which
+  // prevents XSS even if the LLM returns adversarial output.
+  function linkifyToNodes(text) {
+    const frag = document.createDocumentFragment();
+    const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
+    let lastIndex = 0, match;
+    while ((match = urlRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+      const rawUrl = match[1];
+      let safeUrl = null;
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+          safeUrl = parsed.href;
+        }
+      } catch (_) {}
+      if (safeUrl) {
+        const a = document.createElement("a");
+        a.href = safeUrl;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.style.color = "inherit";
+        a.style.textDecoration = "underline";
+        a.style.opacity = "0.8";
+        a.textContent = rawUrl;
+        frag.appendChild(a);
+      } else {
+        frag.appendChild(document.createTextNode(rawUrl));
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+    return frag;
+  }
+
+  // Replaces el's children with safely-built linkified DOM nodes.
+  function setLinkified(el, text) {
+    el.textContent = "";
+    el.appendChild(linkifyToNodes(text));
   }
 
   function hostnameOf(url) {
@@ -388,7 +439,10 @@
       } catch (_) {
         // If the payload is not valid JSON (e.g. the model returned plain text
         // or the stream was truncated), fall back to displaying the raw text.
-        panel.innerHTML = `<p class="ai-overview">${linkify(buffer)}</p>`;
+        const p = document.createElement("p");
+        p.className = "ai-overview";
+        setLinkified(p, buffer);
+        panel.appendChild(p);
         return;
       }
 
@@ -396,7 +450,10 @@
       if (parsed.overview) {
         const el = document.createElement("div");
         el.className = "ai-block";
-        el.innerHTML = `<p class="ai-overview">${linkify(parsed.overview)}</p>`;
+        const p = document.createElement("p");
+        p.className = "ai-overview";
+        setLinkified(p, parsed.overview);
+        el.appendChild(p);
         panel.appendChild(el);
       }
 
@@ -432,8 +489,16 @@
       if (Array.isArray(parsed.follow_up) && parsed.follow_up.length) {
         const wrap = document.createElement("div");
         wrap.className = "ai-block";
-        wrap.innerHTML = `<div class="ai-followup-title">Explore More</div>` +
-          parsed.follow_up.map(q => `<div class="ai-followup-item">${esc(q)}</div>`).join("");
+        const title = document.createElement("div");
+        title.className = "ai-followup-title";
+        title.textContent = "Explore More";
+        wrap.appendChild(title);
+        parsed.follow_up.forEach(function(q) {
+          const item = document.createElement("div");
+          item.className = "ai-followup-item";
+          item.textContent = q;
+          wrap.appendChild(item);
+        });
         panel.appendChild(wrap);
       }
     };
@@ -492,7 +557,7 @@
     function tick() {
       if (!queue.length) {
         if (streamDone) {
-          contentEl.innerHTML = linkify(displayed);
+          setLinkified(contentEl, displayed);
           if (displayed.trim()) addMoreButton(box, results);
           return;
         }
@@ -501,7 +566,10 @@
       }
       const charsPerTick = queue.length > 60 ? 8 : queue.length > 30 ? 4 : queue.length > 10 ? 2 : 1;
       for (let i = 0; i < charsPerTick && queue.length; i++) displayed += queue.shift();
-      contentEl.innerHTML = linkify(displayed) + '<span class="ai-cursor"></span>';
+      const cursor = document.createElement("span");
+      cursor.className = "ai-cursor";
+      setLinkified(contentEl, displayed);
+      contentEl.appendChild(cursor);
       timerID = setTimeout(tick, 16);
     }
 

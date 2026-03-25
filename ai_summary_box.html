@@ -21,11 +21,11 @@
         <span class="ai-summary-icon">✦</span>
         <span class="ai-summary-label">AI Summary</span>
         {% if summary._model is defined %}
-          <span class="ai-summary-model">{{ summary._model }}</span>
+          <span class="ai-summary-model">{{ summary._model | e }}</span>
         {% endif %}
       </div>
       <div class="ai-summary-content">
-        {{ summary.answer }}
+        {{ summary.answer | e }}
       </div>
       <div class="ai-summary-footer">
         <span>AI-generated · May contain inaccuracies · Verify important information</span>
