@@ -111,7 +111,7 @@ def _cache_set(query: str, results: list):
     with _cache_lock:
         # Evict entries older than TTL
         now = time.time()
-        expired = [k for k, v in _cache.items() if now - v["ts"] > _CACHE_TTL]
+        expired = [k for k, v in list(_cache.items()) if now - v["ts"] > _CACHE_TTL]
         for k in expired:
             del _cache[k]
         # Enforce maximum cache size — evict oldest entry if at capacity
