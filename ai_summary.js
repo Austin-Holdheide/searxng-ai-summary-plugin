@@ -330,6 +330,52 @@
     );
   }
 
+  // Safe DOM-based alternative to linkify() — builds a DocumentFragment of
+  // text nodes and anchor elements without ever touching innerHTML, which
+  // prevents XSS even if the LLM returns adversarial output.
+  function linkifyToNodes(text) {
+    const frag = document.createDocumentFragment();
+    const urlRegex = /(https?:\/\/[^\s<>"]+)/g;
+    let lastIndex = 0, match;
+    while ((match = urlRegex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+      const rawUrl = match[1];
+      let safeUrl = null;
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+          safeUrl = parsed.href;
+        }
+      } catch (_) {}
+      if (safeUrl) {
+        const a = document.createElement("a");
+        a.href = safeUrl;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.style.color = "inherit";
+        a.style.textDecoration = "underline";
+        a.style.opacity = "0.8";
+        a.textContent = rawUrl;
+        frag.appendChild(a);
+      } else {
+        frag.appendChild(document.createTextNode(rawUrl));
+      }
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    }
+    return frag;
+  }
+
+  // Replaces el's children with safely-built linkified DOM nodes.
+  function setLinkified(el, text) {
+    el.textContent = "";
+    el.appendChild(linkifyToNodes(text));
+  }
+
   function hostnameOf(url) {
     try { return new URL(url).hostname.replace(/^www\./, ""); }
     catch { return ""; }
@@ -378,7 +424,10 @@
           rendered.overview = true;
           const el = document.createElement("div");
           el.className = "ai-block";
-          el.innerHTML = `<p class="ai-overview">${linkify(m[1])}</p>`;
+          const p = document.createElement("p");
+          p.className = "ai-overview";
+          setLinkified(p, m[1]);
+          el.appendChild(p);
           panel.appendChild(el);
         }
       }
@@ -509,7 +558,7 @@
     function tick() {
       if (!queue.length) {
         if (streamDone) {
-          contentEl.innerHTML = linkify(displayed);
+          setLinkified(contentEl, displayed);
           if (displayed.trim()) addMoreButton(box, results);
           return;
         }
@@ -518,7 +567,10 @@
       }
       const charsPerTick = queue.length > 60 ? 8 : queue.length > 30 ? 4 : queue.length > 10 ? 2 : 1;
       for (let i = 0; i < charsPerTick && queue.length; i++) displayed += queue.shift();
-      contentEl.innerHTML = linkify(displayed) + '<span class="ai-cursor"></span>';
+      const cursor = document.createElement("span");
+      cursor.className = "ai-cursor";
+      setLinkified(contentEl, displayed);
+      contentEl.appendChild(cursor);
       timerID = setTimeout(tick, 16);
     }
 
@@ -570,7 +622,12 @@
         if (initSpinner.parentNode) initSpinner.remove();
         if (genBar.parentNode) genBar.remove();
         update(buffer);
-        if (!panel.children.length) panel.innerHTML = `<p class="ai-overview">${linkify(buffer)}</p>`;
+        if (!panel.children.length) {
+          const p = document.createElement("p");
+          p.className = "ai-overview";
+          setLinkified(p, buffer);
+          panel.appendChild(p);
+        }
       },
       (err) => {
         console.warn("ai_summary more error:", err);
