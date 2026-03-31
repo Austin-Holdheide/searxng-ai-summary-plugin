@@ -264,10 +264,16 @@ ai_summary:
   # Smart/large model — used when the user clicks "More"
   model_more: "qwen/qwen3-vl-8b"
 
-  max_results: 5
+  max_results: 5 # Increase this to get more results summarized, but it will also increase the processing time and the cost if you are using a paid API. 5 is a good middle ground for a good summary without overwhelming the user or the system.
   max_tokens: 300
   max_tokens_more: 800
   timeout: 60
+
+  # Persistent summary cache — stores generated summaries in SQLite so repeat
+  # queries are answered instantly without calling the LLM again.
+  response_cache_enabled: true
+  response_cache_ttl: 604800        # seconds — 7 days
+  response_cache_path: "/etc/searxng/ai_summary_cache.db"  # host: searxng/ai_summary_cache.db
 
 # Configuration of the "Hostnames plugin":
 #

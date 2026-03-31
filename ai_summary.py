@@ -26,6 +26,8 @@ CONFIGURATION (settings.yml)
 
 import json
 import logging
+import os
+import sqlite3
 import threading
 import time
 import typing as t
@@ -130,6 +132,90 @@ def _cache_get(query: str) -> list:
     return []
 
 
+# ── Persistent summary cache (SQLite) ─────────────────────────────────────────
+# Stores completed LLM-generated summaries keyed by (query_key, type).
+# Survives container restarts — DB file lives in the volume-mounted /etc/searxng.
+# Distinct from _cache above, which stores raw search results (short-lived, in-memory).
+
+_db_lock = threading.Lock()
+_DB_PATH_DEFAULT = "/etc/searxng/ai_summary_cache.db"
+_db_path: str = _DB_PATH_DEFAULT
+
+
+def _db_init(path: str) -> None:
+    global _db_path
+    _db_path = path
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with _db_lock:
+            with sqlite3.connect(_db_path) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS summary_cache (
+                        query_key  TEXT NOT NULL,
+                        type       TEXT NOT NULL,
+                        content    TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY (query_key, type)
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_created "
+                    "ON summary_cache(created_at)"
+                )
+                conn.commit()
+        logger.info("ai_summary: persistent summary cache at %s", path)
+    except Exception as exc:
+        logger.warning("ai_summary: could not initialise summary cache: %s", exc)
+
+
+def _db_enabled() -> bool:
+    return bool(_setting("response_cache_enabled", True))
+
+
+def _db_get(query: str, cache_type: str) -> "str | None":
+    if not _db_enabled():
+        return None
+    key = query.lower().strip()
+    ttl = float(_setting("response_cache_ttl", 604800))
+    try:
+        with _db_lock:
+            with sqlite3.connect(_db_path) as conn:
+                row = conn.execute(
+                    "SELECT content, created_at FROM summary_cache "
+                    "WHERE query_key=? AND type=?",
+                    (key, cache_type),
+                ).fetchone()
+        if row and (time.time() - row[1]) < ttl:
+            logger.info(
+                "ai_summary: cache hit (%s) for %r (age %.0fs)",
+                cache_type, query, time.time() - row[1],
+            )
+            return row[0]
+        return None
+    except Exception as exc:
+        logger.warning("ai_summary db_get error: %s", exc)
+        return None
+
+
+def _db_set(query: str, cache_type: str, content: str) -> None:
+    if not _db_enabled() or not content:
+        return
+    key = query.lower().strip()
+    try:
+        with _db_lock:
+            with sqlite3.connect(_db_path) as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO summary_cache "
+                    "(query_key, type, content, created_at) VALUES (?,?,?,?)",
+                    (key, cache_type, content, time.time()),
+                )
+                conn.commit()
+        logger.info("ai_summary: cached %s summary for %r", cache_type, query)
+    except Exception as exc:
+        logger.warning("ai_summary db_set error: %s", exc)
+
+
 # ── LLM streaming ─────────────────────────────────────────────────────────────
 
 def _build_prompt(query: str, results: list) -> str:
@@ -200,6 +286,9 @@ class SXNGPlugin(Plugin):
         )
 
     def init(self, app) -> bool:
+        # Initialise persistent summary cache — file lives in the volume-mounted searxng/ dir
+        _db_init(_setting("response_cache_path", _DB_PATH_DEFAULT))
+
         from flask import request as freq, Response, stream_with_context
 
         # ── Compact summary endpoint ─────────────────────────────────────
@@ -231,12 +320,22 @@ class SXNGPlugin(Plugin):
             logger.info("ai_summary: summarising %d results for %r", len(results), query)
 
             def generate():
+                cached = _db_get(query, "compact")
+                if cached:
+                    yield "data: \"[CACHED]\"\n\n"
+                    yield f"data: {json.dumps(cached)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                chunks: list = []
                 try:
                     for chunk in _stream_llm(query, results, model,
                                              max_tokens, system_prompt):
+                        chunks.append(chunk)
                         yield f"data: {json.dumps(chunk)}\n\n"
                 except Exception as exc:
                     logger.warning("ai_summary stream error: %s", exc)
+                if chunks:
+                    _db_set(query, "compact", "".join(chunks))
                 yield "data: [DONE]\n\n"
 
             return Response(
@@ -264,12 +363,23 @@ class SXNGPlugin(Plugin):
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
 
             def generate():
+                cached = _db_get(query, "more")
+                if cached:
+                    # Send full JSON as a single chunk — JS progressive renderer
+                    # handles a one-shot payload identically to a streamed one.
+                    yield f"data: {json.dumps(cached)}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                chunks: list = []
                 try:
                     for chunk in _stream_llm(query, results, model_more,
                                              max_tokens, system_prompt):
+                        chunks.append(chunk)
                         yield f"data: {json.dumps(chunk)}\n\n"
                 except Exception as exc:
                     logger.warning("ai_summary_more stream error: %s", exc)
+                if chunks:
+                    _db_set(query, "more", "".join(chunks))
                 yield "data: [DONE]\n\n"
 
             return Response(

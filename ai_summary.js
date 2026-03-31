@@ -552,7 +552,7 @@
 
   function streamCompact(box, query, results) {
     const contentEl = box.querySelector(".ai-content");
-    let queue = [], displayed = "", streamDone = false, timerID = null;
+    let queue = [], displayed = "", streamDone = false, timerID = null, fromCache = false;
 
     function tick() {
       if (!queue.length) {
@@ -577,10 +577,23 @@
       "/ai_summary",
       { query, results: results.slice(0, 5) },
       (chunk) => {
+        // Cache hit: first token is the sentinel, second is the full text
+        if (chunk === "[CACHED]") { fromCache = true; return; }
+        if (fromCache) {
+          const cursor = contentEl.querySelector(".ai-cursor");
+          if (cursor) cursor.remove();
+          displayed = chunk;
+          setLinkified(contentEl, displayed);
+          return;
+        }
         for (const ch of chunk) queue.push(ch);
         if (!timerID) timerID = setTimeout(tick, 16);
       },
       () => {
+        if (fromCache) {
+          if (displayed.trim()) addMoreButton(box, results);
+          return;
+        }
         streamDone = true;
         if (!timerID) timerID = setTimeout(tick, 16);
       },
