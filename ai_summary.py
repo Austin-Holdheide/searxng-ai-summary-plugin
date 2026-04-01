@@ -108,6 +108,64 @@ _CACHE_TTL  = 300          # seconds
 _CACHE_MAX  = 500          # maximum number of cached entries
 
 
+# ── Per-IP token bucket rate limiter ─────────────────────────────────────────
+_rate_buckets: dict = {}   # {ip: {"tokens": float, "last": float}}
+_rate_lock = threading.Lock()
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Token bucket: True = allowed, False = rate-limited."""
+    capacity = float(_setting("rate_limit_capacity", 5))
+    rate     = float(_setting("rate_limit_rate", 1.0))   # tokens / second
+    now      = time.time()
+    with _rate_lock:
+        bucket = _rate_buckets.get(ip)
+        if bucket is None:
+            _rate_buckets[ip] = {"tokens": capacity - 1, "last": now}
+            return True
+        elapsed        = now - bucket["last"]
+        tokens         = min(capacity, bucket["tokens"] + elapsed * rate)
+        bucket["last"] = now
+        if tokens >= 1:
+            bucket["tokens"] = tokens - 1
+            # Evict fully-refilled idle buckets to keep the dict bounded
+            idle = [k for k, v in list(_rate_buckets.items())
+                    if v["tokens"] >= capacity and now - v["last"] > capacity / rate]
+            for k in idle:
+                del _rate_buckets[k]
+            return True
+        bucket["tokens"] = tokens
+        return False
+
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+_metrics: dict = {
+    "requests_compact":   0,
+    "requests_more":      0,
+    "cache_hits_compact": 0,
+    "cache_hits_more":    0,
+    "errors_compact":     0,
+    "errors_more":        0,
+    "rate_limited":       0,
+    "latencies_compact":  [],   # float seconds, capped at 500 entries
+    "latencies_more":     [],
+}
+_metrics_lock = threading.Lock()
+
+
+def _incr(key: str) -> None:
+    with _metrics_lock:
+        _metrics[key] += 1
+
+
+def _record_latency(key: str, elapsed: float) -> None:
+    with _metrics_lock:
+        lst = _metrics[key]
+        lst.append(elapsed)
+        if len(lst) > 500:
+            del lst[:-500]
+
+
 def _cache_set(query: str, results: list):
     key = query.lower().strip()
     with _cache_lock:
@@ -296,6 +354,14 @@ class SXNGPlugin(Plugin):
 
         @app.route("/ai_summary", methods=["GET"])
         def ai_summary_api():
+            ip = (freq.headers.get("X-Forwarded-For", "") or freq.remote_addr or "").split(",")[0].strip()
+            if not _check_rate_limit(ip):
+                _incr("rate_limited")
+                return Response(
+                    "data: \"[ERROR] Rate limit exceeded\"\ndata: [DONE]\n\n",
+                    status=429, mimetype="text/event-stream",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+                )
             query = freq.args.get("q", "").strip()[:_MAX_QUERY_LEN]
             if not query:
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
@@ -320,23 +386,35 @@ class SXNGPlugin(Plugin):
             logger.info("ai_summary: summarising %d results for %r", len(results), query)
 
             def generate():
-                cached = _db_get(query, "compact")
-                if cached:
-                    yield "data: \"[CACHED]\"\n\n"
-                    yield f"data: {json.dumps(cached)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    return
-                chunks: list = []
+                _incr("requests_compact")
+                start   = time.time()
+                llm_gen = None
                 try:
-                    for chunk in _stream_llm(query, results, model,
-                                             max_tokens, system_prompt):
-                        chunks.append(chunk)
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                except Exception as exc:
-                    logger.warning("ai_summary stream error: %s", exc)
-                if chunks:
-                    _db_set(query, "compact", "".join(chunks))
-                yield "data: [DONE]\n\n"
+                    cached = _db_get(query, "compact")
+                    if cached:
+                        _incr("cache_hits_compact")
+                        yield "data: \"[CACHED]\"\n\n"
+                        yield f"data: {json.dumps(cached)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+                    chunks: list = []
+                    try:
+                        llm_gen = _stream_llm(query, results, model,
+                                              max_tokens, system_prompt)
+                        for chunk in llm_gen:
+                            chunks.append(chunk)
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                    except Exception as exc:
+                        logger.warning("ai_summary stream error: %s", exc)
+                        _incr("errors_compact")
+                    finally:
+                        if llm_gen is not None:
+                            llm_gen.close()
+                    if chunks:
+                        _db_set(query, "compact", "".join(chunks))
+                    yield "data: [DONE]\n\n"
+                finally:
+                    _record_latency("latencies_compact", time.time() - start)
 
             return Response(
                 stream_with_context(generate()),
@@ -347,6 +425,14 @@ class SXNGPlugin(Plugin):
         # ── More panel endpoint ──────────────────────────────────────────
         @app.route("/ai_summary_more", methods=["GET"])
         def ai_summary_more_api():
+            ip = (freq.headers.get("X-Forwarded-For", "") or freq.remote_addr or "").split(",")[0].strip()
+            if not _check_rate_limit(ip):
+                _incr("rate_limited")
+                return Response(
+                    "data: \"[ERROR] Rate limit exceeded\"\ndata: [DONE]\n\n",
+                    status=429, mimetype="text/event-stream",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+                )
             query = freq.args.get("q", "").strip()[:_MAX_QUERY_LEN]
             if not query:
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
@@ -363,30 +449,83 @@ class SXNGPlugin(Plugin):
                 return Response("data: [DONE]\n\n", mimetype="text/event-stream")
 
             def generate():
-                cached = _db_get(query, "more")
-                if cached:
-                    # Send full JSON as a single chunk — JS progressive renderer
-                    # handles a one-shot payload identically to a streamed one.
-                    yield f"data: {json.dumps(cached)}\n\n"
-                    yield "data: [DONE]\n\n"
-                    return
-                chunks: list = []
+                _incr("requests_more")
+                start   = time.time()
+                llm_gen = None
                 try:
-                    for chunk in _stream_llm(query, results, model_more,
-                                             max_tokens, system_prompt):
-                        chunks.append(chunk)
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                except Exception as exc:
-                    logger.warning("ai_summary_more stream error: %s", exc)
-                if chunks:
-                    _db_set(query, "more", "".join(chunks))
-                yield "data: [DONE]\n\n"
+                    cached = _db_get(query, "more")
+                    if cached:
+                        _incr("cache_hits_more")
+                        # Send full JSON as a single chunk — JS progressive renderer
+                        # handles a one-shot payload identically to a streamed one.
+                        yield f"data: {json.dumps(cached)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+                    chunks: list = []
+                    try:
+                        llm_gen = _stream_llm(query, results, model_more,
+                                              max_tokens, system_prompt)
+                        for chunk in llm_gen:
+                            chunks.append(chunk)
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                    except Exception as exc:
+                        logger.warning("ai_summary_more stream error: %s", exc)
+                        _incr("errors_more")
+                    finally:
+                        if llm_gen is not None:
+                            llm_gen.close()
+                    if chunks:
+                        _db_set(query, "more", "".join(chunks))
+                    yield "data: [DONE]\n\n"
+                finally:
+                    _record_latency("latencies_more", time.time() - start)
 
             return Response(
                 stream_with_context(generate()),
                 mimetype="text/event-stream",
                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
             )
+
+        # ── Stats endpoint ────────────────────────────────────────────────
+        @app.route("/ai_summary_stats", methods=["GET"])
+        def ai_summary_stats():
+            with _metrics_lock:
+                req_c  = _metrics["requests_compact"]
+                req_m  = _metrics["requests_more"]
+                hits_c = _metrics["cache_hits_compact"]
+                hits_m = _metrics["cache_hits_more"]
+                err_c  = _metrics["errors_compact"]
+                err_m  = _metrics["errors_more"]
+                rl     = _metrics["rate_limited"]
+                lat_c  = list(_metrics["latencies_compact"])
+                lat_m  = list(_metrics["latencies_more"])
+
+            def _lat_stats(lst):
+                if not lst:
+                    return {"avg_ms": 0.0, "p50_ms": 0.0, "p95_ms": 0.0}
+                s   = sorted(lst)
+                n   = len(s)
+                avg = sum(s) / n
+                p50 = s[int(n * 0.50)]
+                p95 = s[min(int(n * 0.95), n - 1)]
+                return {
+                    "avg_ms": round(avg * 1000, 1),
+                    "p50_ms": round(p50 * 1000, 1),
+                    "p95_ms": round(p95 * 1000, 1),
+                }
+
+            data = {
+                "requests":          {"compact": req_c, "more": req_m},
+                "cache_hit_rate":    {
+                    "compact": round(hits_c / req_c, 3) if req_c else 0.0,
+                    "more":    round(hits_m / req_m, 3) if req_m else 0.0,
+                },
+                "latency":           {"compact": _lat_stats(lat_c), "more": _lat_stats(lat_m)},
+                "errors":            {"compact": err_c, "more": err_m},
+                "rate_limited":      rl,
+                "result_cache_size": len(_cache),
+            }
+            return Response(json.dumps(data, indent=2), mimetype="application/json")
 
         # ── Script injection ─────────────────────────────────────────────
         @app.after_request

@@ -1,3 +1,4 @@
 searxng/ai_summary_cache.db
 searxng/ai_summary_cache.db-shm
 searxng/ai_summary_cache.db-wal
+test_plugin.py

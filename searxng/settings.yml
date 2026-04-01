@@ -275,6 +275,11 @@ ai_summary:
   response_cache_ttl: 604800        # seconds — 7 days
   response_cache_path: "/etc/searxng/ai_summary_cache.db"  # host: searxng/ai_summary_cache.db
 
+  # Per-IP rate limiting (token bucket). Burst of 5 requests, refills at 1/sec.
+  # Remove or comment out to disable rate limiting.
+  rate_limit_capacity: 5    # max burst size (requests)
+  rate_limit_rate: 1.0      # refill speed (requests per second)
+
 # Configuration of the "Hostnames plugin":
 #
 # hostnames:

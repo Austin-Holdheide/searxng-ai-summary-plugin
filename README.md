@@ -20,40 +20,6 @@ Adds a streaming AI summary above search results using any OpenAI-compatible end
 
 ---
 
-## What It Looks Like
-
-**Compact summary** (fast model, streams in immediately):
-```
-┌──────────────────────────────────────────────────────────────┐
-│  ✦  AI Summary                                               │
-│                                                              │
-│  Apache is a web server used to serve websites. Install it   │
-│  with apt, then start the service with systemctl...▌         │
-│                                                              │
-│  ( More ▾ )                                                  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**More panel** (smart model, renders progressively):
-```
-┌──────────────────────────────────────────────────────────────┐
-│  To run Apache you need to install, start, and configure...  │
-│                                                              │
-│  ○ ubuntu.com  ○ digitalocean.com  ○ apache.org              │
-│                                                              │
-│  Installing Apache                                           │
-│  • Update your package list first                            │
-│  ② ┌─────────────────────────────────────────┐              │
-│     │ </> bash               📋 Copy Code     │              │
-│     │ sudo apt update && sudo apt install     │              │
-│     │ apache2                                 │              │
-│     └─────────────────────────────────────────┘              │
-│                                                              │
-│  ○ spinning  Generating...                                   │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
 
 ## How It Works
 
