@@ -158,6 +158,7 @@ your-folder/
 ```
 
 **Configure the LLM** — add this as a new top-level key (not inside `plugins:`):
+Make sure it matchs the api endponit of you choosing that are relevent. This one it confurged for [LM Studio](https://lmstudio.ai/) local server.
 
 ```yaml
 ai_summary:
